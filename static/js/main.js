@@ -171,6 +171,77 @@ document.addEventListener('DOMContentLoaded', function() {
             this.style.boxShadow = '';
         });
     });
+    
+    // Real-time form validation for signup
+    const signupForm = document.getElementById('signupForm');
+    if (signupForm) {
+        const nameField = document.getElementById('name');
+        const surnameField = document.getElementById('surname');
+        const emailField = document.getElementById('email');
+        const passwordField = document.getElementById('password');
+        const confirmPasswordField = document.getElementById('confirm_password');
+        
+        // Name validation
+        if (nameField) {
+            nameField.addEventListener('blur', function() {
+                if (this.value && !FitCoachUtils.validateName(this.value)) {
+                    this.style.borderColor = 'var(--error-color)';
+                    FitCoachUtils.showNotification('Name should only contain letters, spaces, apostrophes, and hyphens', 'warning');
+                } else {
+                    this.style.borderColor = '';
+                }
+            });
+        }
+        
+        // Surname validation
+        if (surnameField) {
+            surnameField.addEventListener('blur', function() {
+                if (this.value && !FitCoachUtils.validateName(this.value)) {
+                    this.style.borderColor = 'var(--error-color)';
+                    FitCoachUtils.showNotification('Surname should only contain letters, spaces, apostrophes, and hyphens', 'warning');
+                } else {
+                    this.style.borderColor = '';
+                }
+            });
+        }
+        
+        // Email validation
+        if (emailField) {
+            emailField.addEventListener('blur', function() {
+                if (this.value && !FitCoachUtils.validateEmail(this.value)) {
+                    this.style.borderColor = 'var(--error-color)';
+                    FitCoachUtils.showNotification('Please enter a valid email address', 'warning');
+                } else {
+                    this.style.borderColor = '';
+                }
+            });
+        }
+        
+        // Password validation
+        if (passwordField) {
+            passwordField.addEventListener('blur', function() {
+                const errors = FitCoachUtils.validatePassword(this.value);
+                if (errors.length > 0) {
+                    this.style.borderColor = 'var(--error-color)';
+                    FitCoachUtils.showNotification(errors[0], 'warning');
+                } else {
+                    this.style.borderColor = '';
+                }
+            });
+        }
+        
+        // Confirm password validation
+        if (confirmPasswordField && passwordField) {
+            confirmPasswordField.addEventListener('blur', function() {
+                if (this.value && this.value !== passwordField.value) {
+                    this.style.borderColor = 'var(--error-color)';
+                    FitCoachUtils.showNotification('Passwords do not match', 'warning');
+                } else {
+                    this.style.borderColor = '';
+                }
+            });
+        }
+    }
 });
 
 // Password toggle functionality
@@ -248,6 +319,27 @@ const Utils = {
     validateEmail: function(email) {
         const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         return re.test(email);
+    },
+    
+    // Validate password strength
+    validatePassword: function(password) {
+        const errors = [];
+        if (password.length < 6) {
+            errors.push('Password must be at least 6 characters long');
+        }
+        if (!/[A-Za-z]/.test(password)) {
+            errors.push('Password must contain at least one letter');
+        }
+        if (!/[0-9]/.test(password) && password.length < 8) {
+            errors.push('Password should contain numbers for better security');
+        }
+        return errors;
+    },
+    
+    // Validate name (no numbers or special characters)
+    validateName: function(name) {
+        const re = /^[a-zA-Z\s'-]+$/;
+        return re.test(name) && name.trim().length > 0;
     },
     
     // Debounce function
