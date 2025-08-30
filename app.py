@@ -53,11 +53,6 @@ def workouts():
         return redirect(url_for('login'))
     return render_template('workouts.html', name=session.get('name'))
 
-@app.route('/nutrition')
-def nutrition():
-    if 'user' not in session:
-        return redirect(url_for('login'))
-    return render_template('nutrition.html', name=session.get('name'))
 
 @app.route('/logout')
 def logout():
