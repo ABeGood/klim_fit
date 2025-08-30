@@ -16,9 +16,9 @@ def seed_sample_data():
         user2 = User(name="Jane", surname="Smith", email="jane.smith@email.com", age=25, weight_kg=60.0)
         user3 = User(name="Mike", surname="Johnson", email="mike.johnson@email.com", age=35, weight_kg=85.2)
         
-        user1 = db.create_user(user1)
-        user2 = db.create_user(user2)
-        user3 = db.create_user(user3)
+        user1 = db.create_user(user1, password='123')
+        user2 = db.create_user(user2, password='456')
+        user3 = db.create_user(user3, password='789')
         
         # Add sample exercises with parameters
         exercise1 = Exercise(name="Push-ups", description="Upper body strength exercise targeting chest, shoulders, and triceps", has_reps=True)
@@ -35,7 +35,7 @@ def seed_sample_data():
         
         # Add sample admins
         admin1 = Admin(name="Klimentij", surname="Lesniak", email="admin.smith@fitcoach.com")
-        db.create_admin(admin1)
+        db.create_admin(admin1, password='124578')
         
         logger.info("Sample data seeded successfully")
         return True

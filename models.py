@@ -9,6 +9,7 @@ class User:
     name: str = ""
     surname: str = ""
     email: str = ""
+    password_hash: Optional[str] = None
     age: Optional[int] = None
     weight_kg: Optional[float] = None
     created_at: Optional[datetime] = None
@@ -31,6 +32,7 @@ class User:
             name=data.get('name', ''),
             surname=data.get('surname', ''),
             email=data.get('email', ''),
+            password_hash=data.get('password_hash'),
             age=data.get('age'),
             weight_kg=data.get('weight_kg'),
             created_at=data.get('created_at'),
@@ -44,6 +46,7 @@ class User:
             'name': self.name,
             'surname': self.surname,
             'email': self.email,
+            'password_hash': self.password_hash,
             'age': self.age,
             'weight_kg': self.weight_kg,
             'created_at': self.created_at,
@@ -62,6 +65,7 @@ class Admin:
     name: str = ""
     surname: str = ""
     email: str = ""
+    password_hash: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
@@ -78,6 +82,7 @@ class Admin:
             name=data.get('name', ''),
             surname=data.get('surname', ''),
             email=data.get('email', ''),
+            password_hash=data.get('password_hash'),
             created_at=data.get('created_at'),
             updated_at=data.get('updated_at')
         )
@@ -89,6 +94,7 @@ class Admin:
             'name': self.name,
             'surname': self.surname,
             'email': self.email,
+            'password_hash': self.password_hash,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }

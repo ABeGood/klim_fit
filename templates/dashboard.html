@@ -7,6 +7,11 @@
     <div class="dashboard-header">
         <h1>Welcome back, {{ name }}!</h1>
         <p>Here's your fitness coaching overview</p>
+        {% if session.user_type == 'admin' %}
+        <span class="user-badge admin">Admin</span>
+        {% else %}
+        <span class="user-badge user">User</span>
+        {% endif %}
     </div>
     
     <div class="stats-grid">
@@ -44,6 +49,16 @@
             </div>
         </div>
         
+        <div class="dashboard-card">
+            <h2><i class="fas fa-cog"></i> Account Settings</h2>
+            <div class="settings-list">
+                <a href="{{ url_for('change_password') }}" class="setting-item">
+                    <i class="fas fa-key"></i>
+                    <span>Change Password</span>
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

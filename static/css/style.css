@@ -642,3 +642,80 @@ body {
         padding: 1rem;
     }
 }
+
+/* User Badges */
+.user-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 0.5rem;
+}
+
+.user-badge.admin {
+    background: linear-gradient(135deg, var(--primary-color), #ff8f65);
+    color: var(--white);
+}
+
+.user-badge.user {
+    background: linear-gradient(135deg, var(--info-color), #45b8d1);
+    color: var(--white);
+}
+
+/* Settings List */
+.settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.setting-item {
+    display: flex;
+    align-items: center;
+    padding: 1rem;
+    background: var(--white);
+    border-radius: var(--border-radius);
+    text-decoration: none;
+    color: var(--gray-800);
+    transition: var(--transition);
+    border: 1px solid var(--gray-200);
+}
+
+.setting-item:hover {
+    background: var(--gray-100);
+    transform: translateY(-2px);
+    box-shadow: var(--box-shadow);
+    text-decoration: none;
+    color: var(--primary-color);
+}
+
+.setting-item i:first-child {
+    margin-right: 0.75rem;
+    color: var(--primary-color);
+    width: 20px;
+    text-align: center;
+}
+
+.setting-item span {
+    flex: 1;
+    font-weight: 500;
+}
+
+.setting-item i:last-child {
+    color: var(--gray-600);
+    font-size: 0.875rem;
+}
+
+/* Dashboard header enhancements */
+.dashboard-header {
+    position: relative;
+}
+
+.dashboard-header .user-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+}

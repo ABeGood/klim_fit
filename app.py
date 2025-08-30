@@ -1,17 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
-from werkzeug.security import generate_password_hash, check_password_hash
+from database_manager import DatabaseManager
 import os
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this-in-production'
 
-# Simple in-memory user storage (use database in production)
-users = {
-    'coach@fitness.com': {
-        'password': generate_password_hash('password123'),
-        'name': 'John Coach'
-    }
-}
+# Initialize database manager
+db = DatabaseManager()
 
 @app.route('/')
 def index():
@@ -25,13 +20,31 @@ def login():
         email = request.form['email']
         password = request.form['password']
         
-        if email in users and check_password_hash(users[email]['password'], password):
-            session['user'] = email
-            session['name'] = users[email]['name']
-            flash('Login successful!', 'success')
-            return redirect(url_for('dashboard'))
-        else:
+        try:
+            # Try to authenticate as admin first
+            admin = db.authenticate_admin(email, password)
+            if admin:
+                session['user'] = email
+                session['user_id'] = admin.id
+                session['name'] = admin.full_name
+                session['user_type'] = 'admin'
+                flash('Login successful!', 'success')
+                return redirect(url_for('dashboard'))
+            
+            # Try to authenticate as regular user
+            user = db.authenticate_user(email, password)
+            if user:
+                session['user'] = email
+                session['user_id'] = user.id
+                session['name'] = user.full_name
+                session['user_type'] = 'user'
+                flash('Login successful!', 'success')
+                return redirect(url_for('dashboard'))
+            
             flash('Invalid email or password!', 'error')
+            
+        except Exception as e:
+            flash('Login error occurred. Please try again.', 'error')
     
     return render_template('login.html')
 
@@ -53,6 +66,47 @@ def workouts():
         return redirect(url_for('login'))
     return render_template('workouts.html', name=session.get('name'))
 
+
+@app.route('/change_password', methods=['GET', 'POST'])
+def change_password():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        current_password = request.form['current_password']
+        new_password = request.form['new_password']
+        confirm_password = request.form['confirm_password']
+        
+        if new_password != confirm_password:
+            flash('New passwords do not match!', 'error')
+            return render_template('change_password.html')
+        
+        try:
+            user_email = session['user']
+            user_type = session.get('user_type', 'user')
+            
+            # Verify current password
+            if user_type == 'admin':
+                authenticated = db.authenticate_admin(user_email, current_password)
+                if authenticated:
+                    success = db.change_admin_password(session['user_id'], new_password)
+            else:
+                authenticated = db.authenticate_user(user_email, current_password)
+                if authenticated:
+                    success = db.change_user_password(session['user_id'], new_password)
+            
+            if not authenticated:
+                flash('Current password is incorrect!', 'error')
+            elif success:
+                flash('Password changed successfully!', 'success')
+                return redirect(url_for('dashboard'))
+            else:
+                flash('Failed to change password. Please try again.', 'error')
+                
+        except Exception as e:
+            flash('Error changing password. Please try again.', 'error')
+    
+    return render_template('change_password.html')
 
 @app.route('/logout')
 def logout():

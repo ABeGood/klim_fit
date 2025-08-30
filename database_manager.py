@@ -4,6 +4,7 @@ from psycopg2.extras import RealDictCursor, Json
 from contextlib import contextmanager
 import logging
 import json
+import bcrypt
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from models import User, Admin, Exercise
@@ -41,6 +42,18 @@ class DatabaseManager:
             if conn:
                 conn.close()
     
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """Hash a password using bcrypt"""
+        salt = bcrypt.gensalt()
+        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+        return hashed.decode('utf-8')
+    
+    @staticmethod
+    def verify_password(password: str, hashed: str) -> bool:
+        """Verify a password against its hash"""
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    
     def create_tables(self):
         """Create all required tables"""
         create_tables_sql = """
@@ -50,6 +63,7 @@ class DatabaseManager:
             name VARCHAR(100) NOT NULL,
             surname VARCHAR(100) NOT NULL,
             email VARCHAR(255) NOT NULL UNIQUE,
+            password_hash VARCHAR(255),
             age INTEGER CHECK (age > 0 AND age < 150),
             weight_kg DECIMAL(5,2) CHECK (weight_kg > 0),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -72,6 +86,7 @@ class DatabaseManager:
             name VARCHAR(100) NOT NULL,
             surname VARCHAR(100) NOT NULL,
             email VARCHAR(255) NOT NULL UNIQUE,
+            password_hash VARCHAR(255),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -142,20 +157,25 @@ class DatabaseManager:
             raise
     
     # Users CRUD Operations
-    def create_user(self, user: User) -> User:
+    def create_user(self, user: User, password: Optional[str] = None) -> User:
         """Create a new user from User model"""
+        password_hash = None
+        if password:
+            password_hash = self.hash_password(password)
+        
         sql = """
-        INSERT INTO users (name, surname, email, age, weight_kg)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO users (name, surname, email, password_hash, age, weight_kg)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING id, created_at, updated_at;
         """
         
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(sql, (user.name, user.surname, user.email, user.age, user.weight_kg))
+                    cursor.execute(sql, (user.name, user.surname, user.email, password_hash, user.age, user.weight_kg))
                     result = cursor.fetchone()
                     user.id = result[0]
+                    user.password_hash = password_hash
                     user.created_at = result[1]
                     user.updated_at = result[2]
                     conn.commit()
@@ -415,21 +435,53 @@ class DatabaseManager:
         
         return errors
     
-    # Admins CRUD Operations
-    def create_admin(self, admin: Admin) -> Admin:
-        """Create a new admin from Admin model"""
+    def authenticate_user(self, email: str, password: str) -> Optional[User]:
+        """Authenticate a user by email and password"""
+        user = self.get_user_by_email(email)
+        if user and user.password_hash and self.verify_password(password, user.password_hash):
+            return user
+        return None
+    
+    def change_user_password(self, user_id: int, new_password: str) -> bool:
+        """Change user password"""
+        password_hash = self.hash_password(new_password)
         sql = """
-        INSERT INTO admins (name, surname, email)
-        VALUES (%s, %s, %s)
+        UPDATE users 
+        SET password_hash = %s, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (password_hash, user_id))
+                    conn.commit()
+                    logger.info(f"Password changed for user ID: {user_id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error changing user password: {e}")
+            raise
+    
+    # Admins CRUD Operations
+    def create_admin(self, admin: Admin, password: Optional[str] = None) -> Admin:
+        """Create a new admin from Admin model"""
+        password_hash = None
+        if password:
+            password_hash = self.hash_password(password)
+        
+        sql = """
+        INSERT INTO admins (name, surname, email, password_hash)
+        VALUES (%s, %s, %s, %s)
         RETURNING id, created_at, updated_at;
         """
         
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(sql, (admin.name, admin.surname, admin.email))
+                    cursor.execute(sql, (admin.name, admin.surname, admin.email, password_hash))
                     result = cursor.fetchone()
                     admin.id = result[0]
+                    admin.password_hash = password_hash
                     admin.created_at = result[1]
                     admin.updated_at = result[2]
                     conn.commit()
@@ -572,6 +624,33 @@ class DatabaseManager:
                     return cursor.fetchone()[0]
         except Exception as e:
             logger.error(f"Error getting admin count: {e}")
+            raise
+    
+    def authenticate_admin(self, email: str, password: str) -> Optional[Admin]:
+        """Authenticate an admin by email and password"""
+        admin = self.get_admin_by_email(email)
+        if admin and admin.password_hash and self.verify_password(password, admin.password_hash):
+            return admin
+        return None
+    
+    def change_admin_password(self, admin_id: int, new_password: str) -> bool:
+        """Change admin password"""
+        password_hash = self.hash_password(new_password)
+        sql = """
+        UPDATE admins 
+        SET password_hash = %s, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (password_hash, admin_id))
+                    conn.commit()
+                    logger.info(f"Password changed for admin ID: {admin_id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error changing admin password: {e}")
             raise
 
 # Initialize database manager
