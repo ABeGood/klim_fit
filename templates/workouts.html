@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Workouts - Fitness Coach{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <h1><i class="fas fa-running"></i> Workout Library</h1>
+        <button class="btn btn-primary">
+            <i class="fas fa-plus"></i> Create Workout
+        </button>
+    </div>
+    
+    <div class="workout-categories">
+        <div class="category-card">
+            <i class="fas fa-dumbbell"></i>
+            <h3>Strength Training</h3>
+            <p>Build muscle and increase strength</p>
+            <span class="workout-count">12 workouts</span>
+        </div>
+        
+        <div class="category-card">
+            <i class="fas fa-heartbeat"></i>
+            <h3>Cardio</h3>
+            <p>Improve cardiovascular health</p>
+            <span class="workout-count">8 workouts</span>
+        </div>
+        
+        <div class="category-card">
+            <i class="fas fa-leaf"></i>
+            <h3>Flexibility</h3>
+            <p>Enhance mobility and recovery</p>
+            <span class="workout-count">6 workouts</span>
+        </div>
+        
+        <div class="category-card">
+            <i class="fas fa-fire"></i>
+            <h3>HIIT</h3>
+            <p>High-intensity interval training</p>
+            <span class="workout-count">10 workouts</span>
+        </div>
+    </div>
+</div>
+{% endblock %}

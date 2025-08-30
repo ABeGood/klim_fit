@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Fitness Coach{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <i class="fas fa-dumbbell"></i>
+            <h1>FitCoach</h1>
+            <p>Welcome back, coach!</p>
+        </div>
+        
+        <form method="POST" class="auth-form">
+            <div class="form-group">
+                <label for="email">
+                    <i class="fas fa-envelope"></i>
+                    Email
+                </label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">
+                    <i class="fas fa-lock"></i>
+                    Password
+                </label>
+                <input type="password" id="password" name="password" required>
+                <span class="password-toggle" onclick="togglePassword()">
+                    <i class="fas fa-eye" id="toggleIcon"></i>
+                </span>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-sign-in-alt"></i>
+                Login
+            </button>
+        </form>
+        
+        <div class="auth-footer">
+            <p>Demo credentials:</p>
+            <small>Email: coach@fitness.com | Password: password123</small>
+        </div>
+    </div>
+</div>
+{% endblock %}

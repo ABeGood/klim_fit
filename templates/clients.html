@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Clients - Fitness Coach{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <h1><i class="fas fa-users"></i> Client Management</h1>
+        <button class="btn btn-primary">
+            <i class="fas fa-plus"></i> Add New Client
+        </button>
+    </div>
+    
+    <div class="clients-grid">
+        <div class="client-card">
+            <div class="client-avatar">
+                <i class="fas fa-user"></i>
+            </div>
+            <div class="client-info">
+                <h3>Sarah Johnson</h3>
+                <p>Goal: Weight Loss</p>
+                <div class="client-stats">
+                    <span class="stat"><i class="fas fa-calendar"></i> 3 months</span>
+                    <span class="stat"><i class="fas fa-chart-line"></i> -12 lbs</span>
+                </div>
+            </div>
+            <div class="client-actions">
+                <button class="btn btn-sm">View Profile</button>
+            </div>
+        </div>
+        
+        <div class="client-card">
+            <div class="client-avatar">
+                <i class="fas fa-user"></i>
+            </div>
+            <div class="client-info">
+                <h3>Mike Davis</h3>
+                <p>Goal: Muscle Building</p>
+                <div class="client-stats">
+                    <span class="stat"><i class="fas fa-calendar"></i> 6 months</span>
+                    <span class="stat"><i class="fas fa-chart-line"></i> +8 lbs muscle</span>
+                </div>
+            </div>
+            <div class="client-actions">
+                <button class="btn btn-sm">View Profile</button>
+            </div>
+        </div>
+        
+        <div class="client-card">
+            <div class="client-avatar">
+                <i class="fas fa-user"></i>
+            </div>
+            <div class="client-info">
+                <h3>Emma Wilson</h3>
+                <p>Goal: Flexibility & Wellness</p>
+                <div class="client-stats">
+                    <span class="stat"><i class="fas fa-calendar"></i> 2 months</span>
+                    <span class="stat"><i class="fas fa-chart-line"></i> Improved flexibility</span>
+                </div>
+            </div>
+            <div class="client-actions">
+                <button class="btn btn-sm">View Profile</button>
+            </div>
+        </div>
+        
+        <div class="client-card">
+            <div class="client-avatar">
+                <i class="fas fa-user"></i>
+            </div>
+            <div class="client-info">
+                <h3>John Smith</h3>
+                <p>Goal: Endurance Training</p>
+                <div class="client-stats">
+                    <span class="stat"><i class="fas fa-calendar"></i> 4 months</span>
+                    <span class="stat"><i class="fas fa-chart-line"></i> Marathon ready</span>
+                </div>
+            </div>
+            <div class="client-actions">
+                <button class="btn btn-sm">View Profile</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
