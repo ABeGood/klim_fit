@@ -7,7 +7,7 @@ import json
 import bcrypt
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
-from models import User, Admin, Exercise
+from models import User, Admin, Exercise, Workout, ExerciseSet
 
 load_dotenv()
 
@@ -91,6 +91,37 @@ class DatabaseManager:
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         
+        -- Create Workouts table
+        CREATE TABLE IF NOT EXISTS workouts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(200) NOT NULL,
+            description TEXT,
+            workout_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            duration_minutes INTEGER CHECK (duration_minutes > 0),
+            completed BOOLEAN DEFAULT FALSE,
+            comments JSONB DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        -- Create Exercise Sets table
+        CREATE TABLE IF NOT EXISTS exercise_sets (
+            id SERIAL PRIMARY KEY,
+            workout_id INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+            exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+            set_order INTEGER NOT NULL CHECK (set_order > 0),
+            reps INTEGER CHECK (reps > 0),
+            weight_kg DECIMAL(6,2) CHECK (weight_kg > 0),
+            duration_s INTEGER CHECK (duration_s > 0),
+            distance_m DECIMAL(10,2) CHECK (distance_m > 0),
+            rest_seconds INTEGER CHECK (rest_seconds >= 0),
+            completed BOOLEAN DEFAULT FALSE,
+            comments JSONB DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
         -- Create indexes for better performance
         CREATE INDEX IF NOT EXISTS idx_users_name ON users(name, surname);
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -98,6 +129,13 @@ class DatabaseManager:
         CREATE INDEX IF NOT EXISTS idx_exercises_parameters ON exercises USING GIN (parameters);
         CREATE INDEX IF NOT EXISTS idx_admins_name ON admins(name, surname);
         CREATE INDEX IF NOT EXISTS idx_admins_email ON admins(email);
+        CREATE INDEX IF NOT EXISTS idx_workouts_user_id ON workouts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_workouts_date ON workouts(workout_date);
+        CREATE INDEX IF NOT EXISTS idx_exercise_sets_workout_id ON exercise_sets(workout_id);
+        CREATE INDEX IF NOT EXISTS idx_exercise_sets_exercise_id ON exercise_sets(exercise_id);
+        CREATE INDEX IF NOT EXISTS idx_exercise_sets_order ON exercise_sets(workout_id, set_order);
+        CREATE INDEX IF NOT EXISTS idx_workouts_comments ON workouts USING GIN (comments);
+        CREATE INDEX IF NOT EXISTS idx_exercise_sets_comments ON exercise_sets USING GIN (comments);
         
         -- Create trigger for updating updated_at timestamp
         CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -651,6 +689,340 @@ class DatabaseManager:
                     return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error changing admin password: {e}")
+            raise
+    
+    # Workouts CRUD Operations
+    def create_workout(self, workout: Workout) -> Workout:
+        """Create a new workout from Workout model"""
+        sql = """
+        INSERT INTO workouts (user_id, name, description, workout_date, duration_minutes, completed, comments)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id, created_at, updated_at;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (
+                        workout.user_id,
+                        workout.name,
+                        workout.description,
+                        workout.workout_date,
+                        workout.duration_minutes,
+                        workout.completed,
+                        Json(workout.comments or [])
+                    ))
+                    result = cursor.fetchone()
+                    workout.id = result[0]
+                    workout.created_at = result[1]
+                    workout.updated_at = result[2]
+                    conn.commit()
+                    logger.info(f"Workout created with ID: {workout.id}")
+                    return workout
+        except Exception as e:
+            logger.error(f"Error creating workout: {e}")
+            raise
+    
+    def get_workout(self, workout_id: int) -> Optional[Workout]:
+        """Get workout by ID"""
+        sql = "SELECT * FROM workouts WHERE id = %s;"
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(sql, (workout_id,))
+                    result = cursor.fetchone()
+                    return Workout.from_dict(dict(result)) if result else None
+        except Exception as e:
+            logger.error(f"Error getting workout: {e}")
+            raise
+    
+    def get_user_workouts(self, user_id: int, limit: int = 50, offset: int = 0) -> List[Workout]:
+        """Get workouts for a specific user"""
+        sql = """
+        SELECT * FROM workouts 
+        WHERE user_id = %s 
+        ORDER BY workout_date DESC, created_at DESC 
+        LIMIT %s OFFSET %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(sql, (user_id, limit, offset))
+                    results = cursor.fetchall()
+                    return [Workout.from_dict(dict(row)) for row in results]
+        except Exception as e:
+            logger.error(f"Error getting user workouts: {e}")
+            raise
+    
+    def update_workout(self, workout: Workout) -> bool:
+        """Update workout details"""
+        sql = """
+        UPDATE workouts 
+        SET name = %s, description = %s, workout_date = %s, 
+            duration_minutes = %s, completed = %s, comments = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (
+                        workout.name,
+                        workout.description,
+                        workout.workout_date,
+                        workout.duration_minutes,
+                        workout.completed,
+                        Json(workout.comments or []),
+                        workout.id
+                    ))
+                    conn.commit()
+                    logger.info(f"Workout updated: {workout.id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating workout: {e}")
+            raise
+    
+    def delete_workout(self, workout_id: int) -> bool:
+        """Delete workout and all its exercise sets (CASCADE)"""
+        sql = "DELETE FROM workouts WHERE id = %s;"
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (workout_id,))
+                    conn.commit()
+                    logger.info(f"Workout deleted: {workout_id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting workout: {e}")
+            raise
+    
+    # Exercise Sets CRUD Operations
+    def create_exercise_set(self, exercise_set: ExerciseSet) -> ExerciseSet:
+        """Create a new exercise set from ExerciseSet model"""
+        sql = """
+        INSERT INTO exercise_sets (workout_id, exercise_id, set_order, reps, weight_kg, 
+                                 duration_s, distance_m, rest_seconds, completed, comments)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id, created_at, updated_at;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (
+                        exercise_set.workout_id,
+                        exercise_set.exercise_id,
+                        exercise_set.set_order,
+                        exercise_set.reps,
+                        exercise_set.weight_kg,
+                        exercise_set.duration_s,
+                        exercise_set.distance_m,
+                        exercise_set.rest_seconds,
+                        exercise_set.completed,
+                        Json(exercise_set.comments or [])
+                    ))
+                    result = cursor.fetchone()
+                    exercise_set.id = result[0]
+                    exercise_set.created_at = result[1]
+                    exercise_set.updated_at = result[2]
+                    conn.commit()
+                    logger.info(f"Exercise set created with ID: {exercise_set.id}")
+                    return exercise_set
+        except Exception as e:
+            logger.error(f"Error creating exercise set: {e}")
+            raise
+    
+    def get_workout_exercise_sets(self, workout_id: int) -> List[ExerciseSet]:
+        """Get all exercise sets for a workout, ordered by set_order"""
+        sql = """
+        SELECT es.*, e.name as exercise_name, e.parameters 
+        FROM exercise_sets es
+        JOIN exercises e ON es.exercise_id = e.id
+        WHERE es.workout_id = %s 
+        ORDER BY es.set_order;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(sql, (workout_id,))
+                    results = cursor.fetchall()
+                    exercise_sets = []
+                    for row in results:
+                        row_dict = dict(row)
+                        # Remove exercise info from the set data
+                        exercise_name = row_dict.pop('exercise_name', None)
+                        exercise_params = row_dict.pop('parameters', None)
+                        
+                        exercise_set = ExerciseSet.from_dict(row_dict)
+                        # Add exercise info as additional attributes if needed
+                        exercise_set.exercise_name = exercise_name
+                        exercise_set.exercise_parameters = exercise_params
+                        exercise_sets.append(exercise_set)
+                    return exercise_sets
+        except Exception as e:
+            logger.error(f"Error getting workout exercise sets: {e}")
+            raise
+    
+    def update_exercise_set(self, exercise_set: ExerciseSet) -> bool:
+        """Update exercise set details"""
+        sql = """
+        UPDATE exercise_sets 
+        SET set_order = %s, reps = %s, weight_kg = %s, duration_s = %s, 
+            distance_m = %s, rest_seconds = %s, completed = %s, comments = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (
+                        exercise_set.set_order,
+                        exercise_set.reps,
+                        exercise_set.weight_kg,
+                        exercise_set.duration_s,
+                        exercise_set.distance_m,
+                        exercise_set.rest_seconds,
+                        exercise_set.completed,
+                        Json(exercise_set.comments or []),
+                        exercise_set.id
+                    ))
+                    conn.commit()
+                    logger.info(f"Exercise set updated: {exercise_set.id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating exercise set: {e}")
+            raise
+    
+    def delete_exercise_set(self, exercise_set_id: int) -> bool:
+        """Delete exercise set"""
+        sql = "DELETE FROM exercise_sets WHERE id = %s;"
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (exercise_set_id,))
+                    conn.commit()
+                    logger.info(f"Exercise set deleted: {exercise_set_id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting exercise set: {e}")
+            raise
+    
+    def get_workout_with_sets(self, workout_id: int) -> Optional[Dict[str, Any]]:
+        """Get workout with all its exercise sets"""
+        workout = self.get_workout(workout_id)
+        if not workout:
+            return None
+            
+        exercise_sets = self.get_workout_exercise_sets(workout_id)
+        
+        return {
+            'workout': workout,
+            'exercise_sets': exercise_sets,
+            'total_sets': len(exercise_sets)
+        }
+    
+    def mark_workout_complete(self, workout_id: int) -> bool:
+        """Mark a workout as completed"""
+        sql = """
+        UPDATE workouts 
+        SET completed = TRUE, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (workout_id,))
+                    conn.commit()
+                    logger.info(f"Workout marked as complete: {workout_id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error marking workout complete: {e}")
+            raise
+    
+    def mark_exercise_set_complete(self, exercise_set_id: int) -> bool:
+        """Mark an exercise set as completed"""
+        sql = """
+        UPDATE exercise_sets 
+        SET completed = TRUE, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (exercise_set_id,))
+                    conn.commit()
+                    logger.info(f"Exercise set marked as complete: {exercise_set_id}")
+                    return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error marking exercise set complete: {e}")
+            raise
+    
+    def get_workout_progress(self, workout_id: int) -> Dict[str, Any]:
+        """Get workout completion progress"""
+        sql = """
+        SELECT 
+            COUNT(*) as total_sets,
+            COUNT(CASE WHEN completed = TRUE THEN 1 END) as completed_sets,
+            ROUND(
+                (COUNT(CASE WHEN completed = TRUE THEN 1 END) * 100.0 / COUNT(*)), 2
+            ) as completion_percentage
+        FROM exercise_sets 
+        WHERE workout_id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(sql, (workout_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        return {
+                            'total_sets': result['total_sets'],
+                            'completed_sets': result['completed_sets'],
+                            'completion_percentage': float(result['completion_percentage']) if result['completion_percentage'] else 0.0,
+                            'is_workout_complete': result['completed_sets'] == result['total_sets'] and result['total_sets'] > 0
+                        }
+                    return {'total_sets': 0, 'completed_sets': 0, 'completion_percentage': 0.0, 'is_workout_complete': False}
+        except Exception as e:
+            logger.error(f"Error getting workout progress: {e}")
+            raise
+    
+    def get_user_workout_stats(self, user_id: int) -> Dict[str, Any]:
+        """Get user's overall workout statistics"""
+        sql = """
+        SELECT 
+            COUNT(*) as total_workouts,
+            COUNT(CASE WHEN completed = TRUE THEN 1 END) as completed_workouts,
+            COUNT(CASE WHEN completed = FALSE THEN 1 END) as pending_workouts,
+            ROUND(
+                (COUNT(CASE WHEN completed = TRUE THEN 1 END) * 100.0 / COUNT(*)), 2
+            ) as completion_rate
+        FROM workouts 
+        WHERE user_id = %s;
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(sql, (user_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        return {
+                            'total_workouts': result['total_workouts'],
+                            'completed_workouts': result['completed_workouts'],
+                            'pending_workouts': result['pending_workouts'],
+                            'completion_rate': float(result['completion_rate']) if result['completion_rate'] else 0.0
+                        }
+                    return {'total_workouts': 0, 'completed_workouts': 0, 'pending_workouts': 0, 'completion_rate': 0.0}
+        except Exception as e:
+            logger.error(f"Error getting user workout stats: {e}")
             raise
 
 # Initialize database manager
