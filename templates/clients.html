@@ -5,80 +5,497 @@
 {% block content %}
 <div class="page-container">
     <div class="page-header">
-        <h1><i class="fas fa-users"></i> Client Management</h1>
-        <button class="btn btn-primary">
-            <i class="fas fa-plus"></i> Add New Client
-        </button>
+        <h1><i class="fas fa-users"></i> Workout Management</h1>
+        <div class="header-actions">
+            <button id="saveWorkout" class="btn btn-success" style="display: none;">
+                <i class="fas fa-save"></i> Save Workout
+            </button>
+        </div>
     </div>
     
-    <div class="clients-grid">
-        <div class="client-card">
-            <div class="client-avatar">
-                <i class="fas fa-user"></i>
+    <div class="workout-manager">
+        <!-- Column 1: Users List -->
+        <div class="column users-column">
+            <div class="column-header">
+                <h3><i class="fas fa-users"></i> Users</h3>
             </div>
-            <div class="client-info">
-                <h3>Sarah Johnson</h3>
-                <p>Goal: Weight Loss</p>
-                <div class="client-stats">
-                    <span class="stat"><i class="fas fa-calendar"></i> 3 months</span>
-                    <span class="stat"><i class="fas fa-chart-line"></i> -12 lbs</span>
+            <div class="column-content">
+                <div id="usersList" class="users-list">
+                    <div class="loading">Loading users...</div>
                 </div>
-            </div>
-            <div class="client-actions">
-                <button class="btn btn-sm">View Profile</button>
             </div>
         </div>
         
-        <div class="client-card">
-            <div class="client-avatar">
-                <i class="fas fa-user"></i>
+        <!-- Column 2: Workouts List -->
+        <div class="column workouts-column">
+            <div class="column-header">
+                <h3><i class="fas fa-dumbbell"></i> Workouts</h3>
+                <button id="newWorkoutBtn" class="btn btn-sm btn-primary" style="display: none;">
+                    <i class="fas fa-plus"></i> New
+                </button>
             </div>
-            <div class="client-info">
-                <h3>Mike Davis</h3>
-                <p>Goal: Muscle Building</p>
-                <div class="client-stats">
-                    <span class="stat"><i class="fas fa-calendar"></i> 6 months</span>
-                    <span class="stat"><i class="fas fa-chart-line"></i> +8 lbs muscle</span>
+            <div class="column-content">
+                <div id="workoutsList" class="workouts-list">
+                    <div class="placeholder">Select a user to view workouts</div>
                 </div>
-            </div>
-            <div class="client-actions">
-                <button class="btn btn-sm">View Profile</button>
             </div>
         </div>
         
-        <div class="client-card">
-            <div class="client-avatar">
-                <i class="fas fa-user"></i>
-            </div>
-            <div class="client-info">
-                <h3>Emma Wilson</h3>
-                <p>Goal: Flexibility & Wellness</p>
-                <div class="client-stats">
-                    <span class="stat"><i class="fas fa-calendar"></i> 2 months</span>
-                    <span class="stat"><i class="fas fa-chart-line"></i> Improved flexibility</span>
+        <!-- Column 3: Exercise Sets -->
+        <div class="column exercise-sets-column">
+            <div class="column-header">
+                <h3><i class="fas fa-list"></i> Exercise Sets</h3>
+                <div class="workout-info" id="workoutInfo" style="display: none;">
+                    <span id="workoutName"></span>
                 </div>
             </div>
-            <div class="client-actions">
-                <button class="btn btn-sm">View Profile</button>
+            <div class="column-content">
+                <div id="exerciseSetsList" class="exercise-sets-list drop-zone">
+                    <div class="placeholder">Select a workout to view exercise sets</div>
+                    <div class="drop-hint" style="display: none;">
+                        <i class="fas fa-plus-circle"></i>
+                        <p>Drop exercises here to add them to the workout</p>
+                    </div>
+                </div>
             </div>
         </div>
         
-        <div class="client-card">
-            <div class="client-avatar">
-                <i class="fas fa-user"></i>
+        <!-- Column 4: Exercises Library -->
+        <div class="column exercises-column">
+            <div class="column-header">
+                <h3><i class="fas fa-book"></i> Exercise Library</h3>
+                <input type="text" id="exerciseSearch" placeholder="Search exercises..." class="search-input">
             </div>
-            <div class="client-info">
-                <h3>John Smith</h3>
-                <p>Goal: Endurance Training</p>
-                <div class="client-stats">
-                    <span class="stat"><i class="fas fa-calendar"></i> 4 months</span>
-                    <span class="stat"><i class="fas fa-chart-line"></i> Marathon ready</span>
+            <div class="column-content">
+                <div id="exercisesList" class="exercises-list">
+                    <div class="loading">Loading exercises...</div>
                 </div>
-            </div>
-            <div class="client-actions">
-                <button class="btn btn-sm">View Profile</button>
             </div>
         </div>
     </div>
 </div>
+
+<!-- New Workout Modal -->
+<div id="newWorkoutModal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Create New Workout</h2>
+        <form id="newWorkoutForm">
+            <div class="form-group">
+                <label for="workoutName">Workout Name</label>
+                <input type="text" id="workoutNameInput" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="workoutDescription">Description (optional)</label>
+                <textarea id="workoutDescriptionInput" name="description" rows="3"></textarea>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeNewWorkoutModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Workout</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Exercise Set Parameters Modal -->
+<div id="exerciseSetModal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Exercise Set Parameters</h2>
+        <form id="exerciseSetForm">
+            <input type="hidden" id="setId">
+            <div class="exercise-info">
+                <h3 id="modalExerciseName"></h3>
+                <p id="modalExerciseDescription"></p>
+            </div>
+            <div id="parametersContainer" class="parameters-container">
+                <!-- Dynamic parameters will be inserted here -->
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeExerciseSetModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" id="deleteSetBtn" style="display: none;">Delete Set</button>
+                <button type="submit" class="btn btn-primary">Save Parameters</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.workout-manager {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 20px;
+    height: calc(100vh - 200px);
+    margin-top: 20px;
+}
+
+.column {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.column-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.column-header h3 {
+    margin: 0;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.column-content {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.user-item, .workout-item, .exercise-set-item, .exercise-item {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.user-item:hover, .workout-item:hover, .exercise-set-item:hover, .exercise-item:hover {
+    background: #e9ecef;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.user-item.selected, .workout-item.selected, .exercise-set-item.selected {
+    background: #e7f3ff;
+    border-color: #007bff;
+}
+
+.user-item h4, .workout-item h4, .exercise-set-item h4, .exercise-item h4 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.user-item p, .workout-item p, .exercise-set-item p, .exercise-item p {
+    margin: 0;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.exercise-item {
+    position: relative;
+    cursor: grab;
+}
+
+.exercise-item:active {
+    cursor: grabbing;
+}
+
+.exercise-item.dragging {
+    opacity: 0.5;
+    transform: rotate(5deg);
+}
+
+.drop-zone {
+    min-height: 200px;
+    position: relative;
+}
+
+.drop-zone.drag-over {
+    background: #e7f3ff;
+    border: 2px dashed #007bff;
+}
+
+.drop-hint {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: #6c757d;
+    pointer-events: none;
+}
+
+.drop-hint i {
+    font-size: 48px;
+    margin-bottom: 10px;
+    display: block;
+}
+
+.placeholder {
+    text-align: center;
+    color: #6c757d;
+    padding: 40px 20px;
+    font-style: italic;
+}
+
+.loading {
+    text-align: center;
+    color: #6c757d;
+    padding: 20px;
+}
+
+.search-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.workout-info {
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.exercise-set-item {
+    position: relative;
+}
+
+.exercise-set-item .set-order {
+    position: absolute;
+    top: 5px;
+    right: 8px;
+    background: #007bff;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.exercise-set-item .parameters {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #dee2e6;
+    font-size: 11px;
+}
+
+.exercise-set-item .parameters span {
+    display: inline-block;
+    background: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-right: 4px;
+    margin-bottom: 2px;
+}
+
+.exercise-set-item.completed {
+    background: #d4edda;
+    border-color: #28a745;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: white;
+    margin: 10% auto;
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover {
+    color: black;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.form-group input,
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.parameters-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.exercise-info {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+.exercise-info h3 {
+    margin: 0 0 8px 0;
+    color: #495057;
+}
+
+.exercise-info p {
+    margin: 0;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+@media (max-width: 1200px) {
+    .workout-manager {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .workout-manager {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto auto;
+        height: auto;
+    }
+    
+    .column {
+        min-height: 300px;
+    }
+}
+</style>
+
+<script>
+// Global variables
+let selectedUser = null;
+let selectedWorkout = null;
+let users = [];
+let exercises = [];
+let currentWorkoutSets = [];
+
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadUsers();
+    loadExercises();
+    
+    // Setup event listeners
+    document.getElementById('newWorkoutBtn').addEventListener('click', openNewWorkoutModal);
+    document.getElementById('newWorkoutForm').addEventListener('submit', createNewWorkout);
+    document.getElementById('exerciseSetForm').addEventListener('submit', saveExerciseSetParameters);
+    document.getElementById('deleteSetBtn').addEventListener('click', deleteExerciseSet);
+    document.getElementById('saveWorkout').addEventListener('click', saveWorkout);
+    document.getElementById('exerciseSearch').addEventListener('input', filterExercises);
+    
+    // Close modals when clicking outside
+    window.addEventListener('click', function(event) {
+        const newWorkoutModal = document.getElementById('newWorkoutModal');
+        const exerciseSetModal = document.getElementById('exerciseSetModal');
+        
+        if (event.target === newWorkoutModal) {
+            closeNewWorkoutModal();
+        }
+        if (event.target === exerciseSetModal) {
+            closeExerciseSetModal();
+        }
+    });
+    
+    // Close modals when clicking X
+    document.querySelectorAll('.close').forEach(closeBtn => {
+        closeBtn.addEventListener('click', function() {
+            closeNewWorkoutModal();
+            closeExerciseSetModal();
+        });
+    });
+});
+
+// API Functions
+async function apiCall(url, options = {}) {
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('API call failed:', error);
+        FitCoachUtils.showNotification('API call failed: ' + error.message, 'error');
+        throw error;
+    }
+}
+
+// Load users from API
+async function loadUsers() {
+    try {
+        users = await apiCall('/api/users');
+        renderUsers();
+    } catch (error) {
+        document.getElementById('usersList').innerHTML = '<div class="error">Failed to load users</div>';
+    }
+}
+
+// Load exercises from API
+async function loadExercises() {
+    try {
+        exercises = await apiCall('/api/exercises');
+        renderExercises();
+    } catch (error) {
+        document.getElementById('exercisesList').innerHTML = '<div class="error">Failed to load exercises</div>';
+    }
+}
+
+// Continue with more JavaScript functions...
+</script>
 {% endblock %}

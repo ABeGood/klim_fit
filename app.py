@@ -1,6 +1,8 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from database_manager import DatabaseManager
+from models import User, Workout, ExerciseSet, Exercise
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this-in-production'
@@ -164,6 +166,230 @@ def change_password():
             flash('Error changing password. Please try again.', 'error')
     
     return render_template('change_password.html')
+
+# API Routes for Workout Management
+@app.route('/api/users')
+def api_users():
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        users = db.get_all_users()
+        return jsonify([{
+            'id': user.id,
+            'name': user.name,
+            'surname': user.surname,
+            'email': user.email,
+            'full_name': user.full_name,
+            'age': user.age,
+            'weight_kg': user.weight_kg
+        } for user in users])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/users/<int:user_id>/workouts')
+def api_user_workouts(user_id):
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        workouts = db.get_workouts_by_user(user_id)
+        return jsonify([{
+            'id': workout.id,
+            'name': workout.name,
+            'description': workout.description,
+            'workout_date': workout.workout_date.isoformat() if workout.workout_date else None,
+            'duration_minutes': workout.duration_minutes,
+            'completed': workout.completed,
+            'created_at': workout.created_at.isoformat() if workout.created_at else None
+        } for workout in workouts])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/workouts/<int:workout_id>/exercise-sets')
+def api_workout_exercise_sets(workout_id):
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        exercise_sets = db.get_exercise_sets_by_workout(workout_id)
+        result = []
+        for ex_set in exercise_sets:
+            exercise = db.get_exercise_by_id(ex_set.exercise_id)
+            result.append({
+                'id': ex_set.id,
+                'exercise_id': ex_set.exercise_id,
+                'exercise_name': exercise.name if exercise else 'Unknown',
+                'exercise_description': exercise.description if exercise else '',
+                'exercise_parameters': exercise.get_parameters_dict() if exercise else {},
+                'set_order': ex_set.set_order,
+                'reps': ex_set.reps,
+                'weight_kg': ex_set.weight_kg,
+                'duration_s': ex_set.duration_s,
+                'distance_m': ex_set.distance_m,
+                'rest_seconds': ex_set.rest_seconds,
+                'completed': ex_set.completed
+            })
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/exercises')
+def api_exercises():
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        exercises = db.get_all_exercises()
+        return jsonify([{
+            'id': exercise.id,
+            'name': exercise.name,
+            'description': exercise.description,
+            'has_reps': exercise.has_reps,
+            'has_weight_kg': exercise.has_weight_kg,
+            'has_duration_s': exercise.has_duration_s,
+            'has_distance_m': exercise.has_distance_m,
+            'parameter_types': exercise.parameter_types,
+            'parameter_summary': exercise.parameter_summary
+        } for exercise in exercises])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/workouts', methods=['POST'])
+def api_create_workout():
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        name = data.get('name')
+        description = data.get('description', '')
+        
+        if not user_id or not name:
+            return jsonify({'error': 'user_id and name are required'}), 400
+        
+        workout = Workout(
+            user_id=user_id,
+            name=name,
+            description=description,
+            workout_date=datetime.now(),
+            completed=False
+        )
+        
+        created_workout = db.create_workout(workout)
+        return jsonify({
+            'id': created_workout.id,
+            'name': created_workout.name,
+            'description': created_workout.description,
+            'workout_date': created_workout.workout_date.isoformat() if created_workout.workout_date else None,
+            'completed': created_workout.completed
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/workouts/<int:workout_id>/exercise-sets', methods=['POST'])
+def api_add_exercise_set(workout_id):
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        data = request.json
+        exercise_id = data.get('exercise_id')
+        
+        if not exercise_id:
+            return jsonify({'error': 'exercise_id is required'}), 400
+        
+        # Get the highest set_order for this workout
+        existing_sets = db.get_exercise_sets_by_workout(workout_id)
+        next_order = max([s.set_order for s in existing_sets], default=0) + 1
+        
+        exercise_set = ExerciseSet(
+            workout_id=workout_id,
+            exercise_id=exercise_id,
+            set_order=next_order,
+            completed=False
+        )
+        
+        created_set = db.create_exercise_set(exercise_set)
+        exercise = db.get_exercise_by_id(exercise_id)
+        
+        return jsonify({
+            'id': created_set.id,
+            'exercise_id': created_set.exercise_id,
+            'exercise_name': exercise.name if exercise else 'Unknown',
+            'exercise_description': exercise.description if exercise else '',
+            'exercise_parameters': exercise.get_parameters_dict() if exercise else {},
+            'set_order': created_set.set_order,
+            'reps': created_set.reps,
+            'weight_kg': created_set.weight_kg,
+            'duration_s': created_set.duration_s,
+            'distance_m': created_set.distance_m,
+            'rest_seconds': created_set.rest_seconds,
+            'completed': created_set.completed
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/exercise-sets/<int:set_id>', methods=['PUT'])
+def api_update_exercise_set(set_id):
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        data = request.json
+        exercise_set = db.get_exercise_set_by_id(set_id)
+        
+        if not exercise_set:
+            return jsonify({'error': 'Exercise set not found'}), 404
+        
+        # Update fields if provided
+        if 'reps' in data:
+            exercise_set.reps = data['reps'] if data['reps'] else None
+        if 'weight_kg' in data:
+            exercise_set.weight_kg = data['weight_kg'] if data['weight_kg'] else None
+        if 'duration_s' in data:
+            exercise_set.duration_s = data['duration_s'] if data['duration_s'] else None
+        if 'distance_m' in data:
+            exercise_set.distance_m = data['distance_m'] if data['distance_m'] else None
+        if 'rest_seconds' in data:
+            exercise_set.rest_seconds = data['rest_seconds'] if data['rest_seconds'] else None
+        if 'completed' in data:
+            exercise_set.completed = data['completed']
+        
+        updated_set = db.update_exercise_set(exercise_set)
+        exercise = db.get_exercise_by_id(updated_set.exercise_id)
+        
+        return jsonify({
+            'id': updated_set.id,
+            'exercise_id': updated_set.exercise_id,
+            'exercise_name': exercise.name if exercise else 'Unknown',
+            'exercise_description': exercise.description if exercise else '',
+            'exercise_parameters': exercise.get_parameters_dict() if exercise else {},
+            'set_order': updated_set.set_order,
+            'reps': updated_set.reps,
+            'weight_kg': updated_set.weight_kg,
+            'duration_s': updated_set.duration_s,
+            'distance_m': updated_set.distance_m,
+            'rest_seconds': updated_set.rest_seconds,
+            'completed': updated_set.completed
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/exercise-sets/<int:set_id>', methods=['DELETE'])
+def api_delete_exercise_set(set_id):
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        success = db.delete_exercise_set(set_id)
+        if success:
+            return jsonify({'message': 'Exercise set deleted successfully'})
+        else:
+            return jsonify({'error': 'Exercise set not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/logout')
 def logout():
