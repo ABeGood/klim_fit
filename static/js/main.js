@@ -468,6 +468,11 @@ class WorkoutManager {
             <div class="workout-item ${workout.completed ? 'completed' : ''}" 
                  data-workout-id="${workout.id}" 
                  onclick="workoutManager.selectWorkout(${workout.id}, '${workout.name}')">
+                <button class="card-delete-btn" 
+                        onclick="event.stopPropagation(); workoutManager.deleteWorkout(${workout.id}, '${workout.name}')"
+                        title="Delete workout">
+                    ×
+                </button>
                 <h4>${workout.name}</h4>
                 <p>${workout.description || 'No description'}</p>
                 ${workout.workout_date ? `<p><i class="fas fa-calendar"></i> ${new Date(workout.workout_date).toLocaleDateString()}</p>` : ''}
@@ -498,6 +503,11 @@ class WorkoutManager {
                      data-set-id="${set.id}"
                      onclick="workoutManager.editExerciseSet(${set.id})">
                     <div class="set-order">${set.set_order}</div>
+                    <button class="card-delete-btn" 
+                            onclick="event.stopPropagation(); workoutManager.deleteExerciseSetQuick(${set.id}, '${set.exercise_name}')"
+                            title="Delete exercise set">
+                        ×
+                    </button>
                     <h4>${set.exercise_name}</h4>
                     <p>${set.exercise_description || 'No description'}</p>
                     ${parameters.length > 0 ? `
@@ -762,6 +772,29 @@ class WorkoutManager {
         }
     }
 
+    async deleteExerciseSetQuick(setId, exerciseName) {
+        // Show confirmation dialog
+        const confirmed = confirm(`Are you sure you want to delete this "${exerciseName}" exercise set?\n\nThis action cannot be undone.`);
+        
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            await this.apiCall(`/api/exercise-sets/${setId}`, {
+                method: 'DELETE'
+            });
+
+            // Remove from local data
+            this.currentWorkoutSets = this.currentWorkoutSets.filter(s => s.id != setId);
+            
+            this.renderExerciseSets();
+            FitCoachUtils.showNotification(`"${exerciseName}" exercise set deleted successfully`, 'success');
+        } catch (error) {
+            FitCoachUtils.showNotification(`Failed to delete "${exerciseName}" exercise set`, 'error');
+        }
+    }
+
     // Workout management
     openNewWorkoutModal() {
         if (!this.selectedUser) {
@@ -844,6 +877,40 @@ class WorkoutManager {
         }
 
         FitCoachUtils.showNotification('Workout saved successfully!', 'success');
+    }
+
+    async deleteWorkout(workoutId, workoutName) {
+        // Show confirmation dialog
+        const confirmed = confirm(`Are you sure you want to delete the workout "${workoutName}"?\n\nThis will also delete all exercise sets in this workout.\n\nThis action cannot be undone.`);
+        
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            // Call the API to delete the workout
+            const response = await this.apiCall(`/api/workouts/${workoutId}`, {
+                method: 'DELETE'
+            });
+
+            // If the deleted workout was selected, clear the selection
+            if (this.selectedWorkout && this.selectedWorkout.id === workoutId) {
+                this.selectedWorkout = null;
+                document.getElementById('exerciseSetsList').innerHTML = '<div class="placeholder">Select a workout to view exercise sets</div><div class="drop-hint" style="display: none;"><i class="fas fa-plus-circle"></i><p>Drop exercises here to add them to the workout</p></div>';
+                document.getElementById('workoutInfo').style.display = 'none';
+                this.hideSaveButton();
+                this.currentWorkoutSets = [];
+            }
+
+            // Reload workouts for the current user
+            if (this.selectedUser) {
+                this.loadWorkouts(this.selectedUser.id);
+            }
+
+            FitCoachUtils.showNotification(`Workout "${workoutName}" deleted successfully`, 'success');
+        } catch (error) {
+            FitCoachUtils.showNotification(`Failed to delete workout "${workoutName}"`, 'error');
+        }
     }
 
     // Event listeners setup

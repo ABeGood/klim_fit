@@ -182,6 +182,42 @@
     border-color: #007bff;
 }
 
+.workout-item {
+    position: relative;
+}
+
+/* Common delete button styles for all cards */
+.card-delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #dc3545;
+    color: white;
+    border: none;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.2s ease;
+    z-index: 10;
+}
+
+.card-delete-btn:hover {
+    background: #c82333;
+    transform: scale(1.1);
+}
+
+.workout-item:hover .card-delete-btn,
+.exercise-set-item:hover .card-delete-btn {
+    opacity: 1;
+}
+
 .user-item h4, .workout-item h4, .exercise-set-item h4, .exercise-item h4 {
     margin: 0 0 4px 0;
     font-size: 14px;
@@ -268,8 +304,8 @@
 
 .exercise-set-item .set-order {
     position: absolute;
-    top: 5px;
-    right: 8px;
+    top: 8px;
+    left: 8px;
     background: #007bff;
     color: white;
     border-radius: 50%;
@@ -280,6 +316,7 @@
     justify-content: center;
     font-size: 10px;
     font-weight: bold;
+    z-index: 5;
 }
 
 .exercise-set-item .parameters {

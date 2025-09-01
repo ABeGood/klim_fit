@@ -391,6 +391,20 @@ def api_delete_exercise_set(set_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/workouts/<int:workout_id>', methods=['DELETE'])
+def api_delete_workout(workout_id):
+    if 'user' not in session or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        success = db.delete_workout(workout_id)
+        if success:
+            return jsonify({'message': 'Workout deleted successfully'})
+        else:
+            return jsonify({'error': 'Workout not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/logout')
 def logout():
     session.clear()
