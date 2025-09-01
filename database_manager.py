@@ -163,6 +163,18 @@ class DatabaseManager:
             BEFORE UPDATE ON admins
             FOR EACH ROW
             EXECUTE FUNCTION update_updated_at_column();
+        
+        DROP TRIGGER IF EXISTS update_workouts_updated_at ON workouts;
+        CREATE TRIGGER update_workouts_updated_at
+            BEFORE UPDATE ON workouts
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();
+        
+        DROP TRIGGER IF EXISTS update_exercise_sets_updated_at ON exercise_sets;
+        CREATE TRIGGER update_exercise_sets_updated_at
+            BEFORE UPDATE ON exercise_sets
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();
         """
         
         try:
@@ -178,6 +190,8 @@ class DatabaseManager:
     def drop_tables(self):
         """Drop all tables (use with caution)"""
         drop_sql = """
+        DROP TABLE IF EXISTS exercise_sets CASCADE;
+        DROP TABLE IF EXISTS workouts CASCADE;
         DROP TABLE IF EXISTS users CASCADE;
         DROP TABLE IF EXISTS exercises CASCADE;
         DROP TABLE IF EXISTS admins CASCADE;
@@ -315,6 +329,10 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error creating exercise: {e}")
             raise
+    
+    def get_exercise_by_id(self, exercise_id: int) -> Optional[Exercise]:
+        """Get exercise by ID (alias for compatibility)"""
+        return self.get_exercise(exercise_id)
     
     def get_exercise(self, exercise_id: int) -> Optional[Exercise]:
         """Get exercise by ID"""
@@ -737,6 +755,10 @@ class DatabaseManager:
             logger.error(f"Error getting workout: {e}")
             raise
     
+    def get_workouts_by_user(self, user_id: int, limit: int = 50, offset: int = 0) -> List[Workout]:
+        """Get workouts for a specific user (alias for compatibility)"""
+        return self.get_user_workouts(user_id, limit, offset)
+    
     def get_user_workouts(self, user_id: int, limit: int = 50, offset: int = 0) -> List[Workout]:
         """Get workouts for a specific user"""
         sql = """
@@ -835,6 +857,10 @@ class DatabaseManager:
             logger.error(f"Error creating exercise set: {e}")
             raise
     
+    def get_exercise_sets_by_workout(self, workout_id: int) -> List[ExerciseSet]:
+        """Get exercise sets for a workout (alias for compatibility)"""
+        return self.get_workout_exercise_sets(workout_id)
+    
     def get_workout_exercise_sets(self, workout_id: int) -> List[ExerciseSet]:
         """Get all exercise sets for a workout, ordered by set_order"""
         sql = """
@@ -867,13 +893,28 @@ class DatabaseManager:
             logger.error(f"Error getting workout exercise sets: {e}")
             raise
     
-    def update_exercise_set(self, exercise_set: ExerciseSet) -> bool:
-        """Update exercise set details"""
+    def get_exercise_set_by_id(self, exercise_set_id: int) -> Optional[ExerciseSet]:
+        """Get exercise set by ID"""
+        sql = "SELECT * FROM exercise_sets WHERE id = %s;"
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(sql, (exercise_set_id,))
+                    result = cursor.fetchone()
+                    return ExerciseSet.from_dict(dict(result)) if result else None
+        except Exception as e:
+            logger.error(f"Error getting exercise set: {e}")
+            raise
+    
+    def update_exercise_set(self, exercise_set: ExerciseSet) -> ExerciseSet:
+        """Update exercise set details and return updated object"""
         sql = """
         UPDATE exercise_sets 
         SET set_order = %s, reps = %s, weight_kg = %s, duration_s = %s, 
             distance_m = %s, rest_seconds = %s, completed = %s, comments = %s, updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s;
+        WHERE id = %s
+        RETURNING updated_at;
         """
         
         try:
@@ -890,9 +931,14 @@ class DatabaseManager:
                         Json(exercise_set.comments or []),
                         exercise_set.id
                     ))
-                    conn.commit()
-                    logger.info(f"Exercise set updated: {exercise_set.id}")
-                    return cursor.rowcount > 0
+                    result = cursor.fetchone()
+                    if result:
+                        exercise_set.updated_at = result[0]
+                        conn.commit()
+                        logger.info(f"Exercise set updated: {exercise_set.id}")
+                        return exercise_set
+                    else:
+                        raise ValueError(f"Exercise set with ID {exercise_set.id} not found")
         except Exception as e:
             logger.error(f"Error updating exercise set: {e}")
             raise
