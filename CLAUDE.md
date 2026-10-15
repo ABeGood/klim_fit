@@ -16,7 +16,7 @@ python db_tests.py                         # NOT pytest — seeds sample data in
 ```
 
 - **Deps**: `pyproject.toml` declares them, `uv.lock` pins the whole graph (35 packages), Docker builds with `uv sync --frozen`. Python 3.14. There is no `requirements.txt` — don't reintroduce one; an unpinned transitive `starlette` bump once broke prod, which is why the lock exists.
-- **Deploy**: Railway autodeploys `main` from the `Dockerfile` (uvicorn on `$PORT`). Required service vars: `DATABASE_URL`, `SESSION_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`. Live at https://klimfit.up.railway.app
+- **Deploy**: Railway autodeploys `main` from the `Dockerfile` (uvicorn on `$PORT`). Required service vars: `DATABASE_URL`, `SESSION_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. Live at https://klimfit.up.railway.app
 - VS Code: `.vscode/launch.json` has a "FastAPI (uvicorn)" debugpy config (no `--reload` — the reloader subprocess breaks breakpoints).
 - API docs auto-generated at `/docs` (Swagger) and `/redoc`.
 - There is **no test suite** and **no linter config**. `db_tests.py` is a manual seeding/smoke script.
@@ -71,7 +71,7 @@ Route protection is **inconsistent by design of history** — follow the pattern
 - API routes: call `require_admin(request)` first line (raises 401). `require_auth()` exists (raises 302-with-Location) but is barely used.
 - **There is no `require_user` and no per-user ownership check on API data** — every `/api/*` endpoint is admin-only right now (see Gotchas).
 
-Google OAuth (`authlib`): `/auth/google/login` → Google → `/auth/google/callback`. Callback matches by `google_id`, then by email (linking accounts), else creates a new user with no password. Config from `.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`.
+Google OAuth (`authlib`): `/auth/google/login` → Google → `/auth/google/callback`. Callback matches by `google_id`, then by email (linking accounts), else creates a new user with no password. Config from `.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. The redirect URI is **derived from the live request** via `request.url_for('google_callback')` — there is no `GOOGLE_REDIRECT_URI` var (a stale one once sent production logins to `127.0.0.1`). Every host you serve from must be registered in Google Cloud Console, and uvicorn needs `--forwarded-allow-ips='*'` (set in the Dockerfile) so the derived scheme is `https` behind Railway's proxy.
 
 Passwords: bcrypt via `DatabaseManager.hash_password/verify_password`. `password_hash` is nullable (OAuth-only accounts).
 
@@ -152,7 +152,7 @@ Page routes: `/` `/login` `/signup` `/dashboard` (redirects by user_type) `/admi
 6. **`get_workout_exercise_sets` bolts `exercise_name`/`exercise_parameters` onto `ExerciseSet` instances dynamically** (not dataclass fields) — don't rely on them existing elsewhere.
 7. Duplicate alias methods exist (`get_exercise_by_id`→`get_exercise`, `get_workouts_by_user`→`get_user_workouts`, `get_exercise_sets_by_workout`→`get_workout_exercise_sets`) — kept for compatibility; prefer the alias already used in `app.py` for consistency.
 8. Broad `except Exception` → flash-message-and-redirect is the standard error pattern in page routes; API routes convert to `HTTPException(500, str(e))`. Don't let `HTTPException` get swallowed — re-raise it first (existing endpoints do `except HTTPException: raise`).
-9. `.env` (note: lowercase, in repo root, gitignored) needs `DATABASE_URL` + the three Google OAuth vars. `DatabaseManager` raises at import time if `DATABASE_URL` is missing, and rewrites `postgres://` → `postgresql://` (Railway quirk).
+9. `.env` (note: lowercase, in repo root, gitignored) needs `DATABASE_URL` + `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (and optionally `SESSION_SECRET`). `DatabaseManager` raises at import time if `DATABASE_URL` is missing, and rewrites `postgres://` → `postgresql://` (Railway quirk).
 
 ## How to Add a Feature (recipes)
 

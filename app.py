@@ -208,7 +208,9 @@ async def signup_post(
 @app.get('/auth/google/login')
 async def google_login(request: Request):
     """Initiate Google OAuth login"""
-    redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'http://127.0.0.1:5000/auth/google/callback')
+    # Derived from the live request so it is correct on localhost and in prod alike;
+    # a stale GOOGLE_REDIRECT_URI used to send production logins to 127.0.0.1.
+    redirect_uri = str(request.url_for('google_callback'))
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 @app.get('/auth/google/callback')

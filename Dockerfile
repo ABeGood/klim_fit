@@ -16,5 +16,6 @@ COPY . .
 
 EXPOSE 8080
 
-# Railway PORT;
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Railway PORT; forwarded-allow-ips so X-Forwarded-Proto from Railway's edge is
+# trusted and request.url_for() yields https (used to build the OAuth redirect).
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080} --forwarded-allow-ips='*'"]
