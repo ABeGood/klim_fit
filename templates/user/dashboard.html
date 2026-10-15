@@ -1,0 +1,191 @@
+{% extends "user/base.html" %}
+
+{% block title %}My Workouts - FitCoach{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <div class="dashboard-header">
+        <h1>Welcome back, {{ name }}!</h1>
+        <p>Track your fitness journey</p>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-dumbbell"></i>
+            </div>
+            <div class="stat-info">
+                <h3>{{ total_workouts }}</h3>
+                <p>Total Workouts</p>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon" style="background: var(--success-color);">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <div class="stat-info">
+                <h3>{{ completed_workouts }}</h3>
+                <p>Completed</p>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon" style="background: var(--warning-color);">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div class="stat-info">
+                <h3>{{ pending_workouts }}</h3>
+                <p>Pending</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workouts List -->
+    <div class="workouts-section">
+        <h2><i class="fas fa-list"></i> My Workouts</h2>
+
+        {% if workouts %}
+        <div class="workouts-grid">
+            {% for workout in workouts %}
+            <div class="workout-card {% if workout.completed %}completed{% endif %}">
+                <div class="workout-card-header">
+                    <div class="workout-status">
+                        {% if workout.completed %}
+                        <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
+                        <span class="status-badge completed">Completed</span>
+                        {% else %}
+                        <i class="fas fa-clock" style="color: var(--warning-color);"></i>
+                        <span class="status-badge pending">Pending</span>
+                        {% endif %}
+                    </div>
+                    <h3>{{ workout.name }}</h3>
+                </div>
+
+                <div class="workout-card-body">
+                    {% if workout.description %}
+                    <p class="workout-description">{{ workout.description }}</p>
+                    {% endif %}
+
+                    <div class="workout-meta">
+                        <div class="meta-item">
+                            <i class="fas fa-calendar"></i>
+                            <span>{{ workout.workout_date.strftime('%B %d, %Y') if workout.workout_date else 'Not scheduled' }}</span>
+                        </div>
+                        {% if workout.duration_minutes %}
+                        <div class="meta-item">
+                            <i class="fas fa-stopwatch"></i>
+                            <span>{{ workout.duration_minutes }} min</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="workout-card-footer">
+                    <button onclick="viewWorkoutDetails({{ workout.id }})" class="btn btn-primary">
+                        <i class="fas fa-eye"></i> View Details
+                    </button>
+                    {% if not workout.completed %}
+                    <button onclick="markWorkoutComplete({{ workout.id }})" class="btn btn-success">
+                        <i class="fas fa-check"></i> Mark Complete
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state-large">
+            <i class="fas fa-dumbbell fa-4x"></i>
+            <h2>No Workouts Yet</h2>
+            <p>Your coach will assign workouts to you</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Workout Details Modal -->
+<div id="workoutModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h2 id="modalWorkoutName">Workout Details</h2>
+            <span class="close">&times;</span>
+        </div>
+        <div class="modal-body" id="modalWorkoutContent">
+            <div class="loading">Loading...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const modal = document.getElementById('workoutModal');
+const span = document.getElementsByClassName('close')[0];
+
+span.onclick = function() {
+    modal.style.display = 'none';
+}
+
+window.onclick = function(event) {
+    if (event.target == modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function viewWorkoutDetails(workoutId) {
+    document.getElementById('modalWorkoutName').textContent = 'Workout Details';
+    document.getElementById('modalWorkoutContent').innerHTML = '<div class="loading">Loading...</div>';
+    modal.style.display = 'block';
+
+    try {
+        const response = await fetch(`/api/workouts/${workoutId}/exercise-sets`);
+        const sets = await response.json();
+
+        if (sets.length === 0) {
+            document.getElementById('modalWorkoutContent').innerHTML = '<p class="empty-state">No exercises in this workout</p>';
+            return;
+        }
+
+        let html = '<div class="exercises-detail-list">';
+        sets.forEach((set, index) => {
+            html += `
+                <div class="exercise-detail-card">
+                    <div class="exercise-number-large">${index + 1}</div>
+                    <div class="exercise-detail-content">
+                        <h4>${set.exercise_name}</h4>
+                        ${set.exercise_description ? `<p>${set.exercise_description}</p>` : ''}
+                        <div class="exercise-params-detail">
+                            ${set.exercise_parameters.has_reps ? `<div class="param-detail"><i class="fas fa-redo"></i> <strong>Reps:</strong> ${set.reps || 'Not set'}</div>` : ''}
+                            ${set.exercise_parameters.has_weight_kg ? `<div class="param-detail"><i class="fas fa-weight"></i> <strong>Weight:</strong> ${set.weight_kg || 'Not set'} kg</div>` : ''}
+                            ${set.exercise_parameters.has_duration_s ? `<div class="param-detail"><i class="fas fa-clock"></i> <strong>Duration:</strong> ${set.duration_s || 'Not set'} sec</div>` : ''}
+                            ${set.exercise_parameters.has_distance_m ? `<div class="param-detail"><i class="fas fa-ruler"></i> <strong>Distance:</strong> ${set.distance_m || 'Not set'} m</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        document.getElementById('modalWorkoutContent').innerHTML = html;
+    } catch (error) {
+        document.getElementById('modalWorkoutContent').innerHTML = '<p class="error">Failed to load workout details</p>';
+    }
+}
+
+async function markWorkoutComplete(workoutId) {
+    if (!confirm('Mark this workout as completed?')) {
+        return;
+    }
+
+    try {
+        // Note: You'll need to add an API endpoint to mark workout as complete
+        alert('Workout marked as complete! (API endpoint needed)');
+        location.reload();
+    } catch (error) {
+        alert('Error marking workout complete: ' + error.message);
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,135 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Users Management - FitCoach Admin{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <div class="page-header">
+        <h1><i class="fas fa-users"></i> Users Management</h1>
+        <p>Manage all registered users</p>
+    </div>
+
+    {% if users %}
+    <div class="users-table-container">
+        <table class="users-table">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Email</th>
+                    <th>Age</th>
+                    <th>Weight (kg)</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>
+                        <div class="user-cell">
+                            {% if user.profile_picture %}
+                            <img src="{{ user.profile_picture }}" alt="{{ user.full_name }}" class="table-avatar">
+                            {% else %}
+                            <div class="table-avatar-placeholder">{{ user.name[0] }}{{ user.surname[0] }}</div>
+                            {% endif %}
+                            <span>{{ user.full_name }}</span>
+                        </div>
+                    </td>
+                    <td>{{ user.email }}</td>
+                    <td>{{ user.age if user.age else '-' }}</td>
+                    <td>{{ user.weight_kg if user.weight_kg else '-' }}</td>
+                    <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
+                    <td>
+                        <div class="action-buttons-inline">
+                            <a href="/api/users/{{ user.id }}/workouts" class="btn-sm" onclick="viewUserWorkouts({{ user.id }}, '{{ user.full_name }}'); return false;">
+                                <i class="fas fa-dumbbell"></i> Workouts
+                            </a>
+                            <a href="/admin/workout-composer" class="btn-sm btn-primary">
+                                <i class="fas fa-plus"></i> New Workout
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state-large">
+        <i class="fas fa-users fa-4x"></i>
+        <h2>No Users Yet</h2>
+        <p>Users will appear here when they sign up</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- User Workouts Modal -->
+<div id="workoutsModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modalUserName">User Workouts</h2>
+            <span class="close">&times;</span>
+        </div>
+        <div class="modal-body" id="modalWorkoutsContent">
+            <div class="loading">Loading...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const modal = document.getElementById('workoutsModal');
+const span = document.getElementsByClassName('close')[0];
+
+span.onclick = function() {
+    modal.style.display = 'none';
+}
+
+window.onclick = function(event) {
+    if (event.target == modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function viewUserWorkouts(userId, userName) {
+    document.getElementById('modalUserName').textContent = `${userName}'s Workouts`;
+    document.getElementById('modalWorkoutsContent').innerHTML = '<div class="loading">Loading...</div>';
+    modal.style.display = 'block';
+
+    try {
+        const response = await fetch(`/api/users/${userId}/workouts`);
+        const workouts = await response.json();
+
+        if (workouts.length === 0) {
+            document.getElementById('modalWorkoutsContent').innerHTML = '<p class="empty-state">No workouts assigned yet</p>';
+            return;
+        }
+
+        let html = '<div class="workouts-list">';
+        workouts.forEach(workout => {
+            const statusIcon = workout.completed ?
+                '<i class="fas fa-check-circle" style="color: var(--success-color);"></i>' :
+                '<i class="fas fa-clock" style="color: var(--warning-color);"></i>';
+
+            html += `
+                <div class="workout-item-modal">
+                    ${statusIcon}
+                    <div class="workout-details">
+                        <h4>${workout.name}</h4>
+                        <p>${workout.description || 'No description'}</p>
+                        <small>Date: ${new Date(workout.workout_date).toLocaleDateString()}</small>
+                        ${workout.duration_minutes ? `<small> | Duration: ${workout.duration_minutes} min</small>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        document.getElementById('modalWorkoutsContent').innerHTML = html;
+    } catch (error) {
+        document.getElementById('modalWorkoutsContent').innerHTML = '<p class="error">Failed to load workouts</p>';
+    }
+}
+</script>
+{% endblock %}

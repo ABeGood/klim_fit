@@ -2,6 +2,7 @@ from database_manager import DatabaseManager, init_database
 from models import User, Admin, Exercise, Workout, ExerciseSet
 import logging
 from datetime import datetime, timedelta
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -396,6 +397,38 @@ def test_workout_functionality():
         print(f"❌ Workout test failed: {e}")
         logger.error(f"Workout test error: {e}")
 
+def run_migration(migration_file: str):
+    """Run a SQL migration file"""
+    try:
+        db = DatabaseManager()
+
+        # Read the migration file
+        if not os.path.exists(migration_file):
+            print(f"❌ Migration file not found: {migration_file}")
+            return False
+
+        with open(migration_file, 'r') as f:
+            sql = f.read()
+
+        print(f"Running migration: {migration_file}")
+        print(f"SQL Preview:\n{'-'*50}")
+        print(sql[:200] + "..." if len(sql) > 200 else sql)
+        print(f"{'-'*50}\n")
+
+        # Execute the migration
+        with db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+                conn.commit()
+
+        print(f"✓ Migration completed successfully!")
+        return True
+
+    except Exception as e:
+        print(f"❌ Migration failed: {e}")
+        logger.error(f"Migration error: {e}")
+        return False
+
 def interactive_menu():
     """Interactive menu for database operations"""
     while True:
@@ -406,10 +439,11 @@ def interactive_menu():
         print("4. Test workout functionality specifically")
         print("5. Drop all tables")
         print("6. Create tables only")
-        print("7. Exit")
+        print("7. Run migration file")
+        print("8. Exit")
         
-        choice = input("\nEnter your choice (1-7): ").strip()
-        
+        choice = input("\nEnter your choice (1-8): ").strip()
+
         if choice == '1':
             test_database_operations()
         elif choice == '2':
@@ -436,10 +470,15 @@ def interactive_menu():
             except Exception as e:
                 print(f"❌ Error creating tables: {e}")
         elif choice == '7':
+            migration_file = input("Enter migration file path (default: migrations/001_add_google_oauth.sql): ").strip()
+            if not migration_file:
+                migration_file = "migrations/001_add_google_oauth.sql"
+            run_migration(migration_file)
+        elif choice == '8':
             print("Goodbye!")
             break
         else:
-            print("Invalid choice. Please enter 1-7.")
+            print("Invalid choice. Please enter 1-8.")
 
 if __name__ == "__main__":
     interactive_menu()

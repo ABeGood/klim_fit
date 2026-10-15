@@ -13,6 +13,8 @@ class User:
     password_hash: Optional[str] = None
     age: Optional[int] = None
     weight_kg: Optional[float] = None
+    google_id: Optional[str] = None
+    profile_picture: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
@@ -36,10 +38,12 @@ class User:
             password_hash=data.get('password_hash'),
             age=data.get('age'),
             weight_kg=data.get('weight_kg'),
+            google_id=data.get('google_id'),
+            profile_picture=data.get('profile_picture'),
             created_at=data.get('created_at'),
             updated_at=data.get('updated_at')
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert User instance to dictionary"""
         return {
@@ -50,6 +54,8 @@ class User:
             'password_hash': self.password_hash,
             'age': self.age,
             'weight_kg': self.weight_kg,
+            'google_id': self.google_id,
+            'profile_picture': self.profile_picture,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -67,6 +73,8 @@ class Admin:
     surname: str = ""
     email: str = ""
     password_hash: Optional[str] = None
+    google_id: Optional[str] = None
+    profile_picture: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
@@ -84,10 +92,12 @@ class Admin:
             surname=data.get('surname', ''),
             email=data.get('email', ''),
             password_hash=data.get('password_hash'),
+            google_id=data.get('google_id'),
+            profile_picture=data.get('profile_picture'),
             created_at=data.get('created_at'),
             updated_at=data.get('updated_at')
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert Admin instance to dictionary"""
         return {
@@ -96,6 +106,8 @@ class Admin:
             'surname': self.surname,
             'email': self.email,
             'password_hash': self.password_hash,
+            'google_id': self.google_id,
+            'profile_picture': self.profile_picture,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -238,9 +250,12 @@ def exercises_from_list(data_list: list[Dict[str, Any]]) -> list[Exercise]:
 
 @dataclass
 class Workout:
-    """Workout session data model"""
+    """Workout session data model.
+
+    user_id is optional: a workout with user_id=None is a template
+    that can be assigned to a client later."""
     id: Optional[int] = None
-    user_id: int = 0
+    user_id: Optional[int] = None
     name: str = ""
     description: Optional[str] = None
     workout_date: Optional[datetime] = None
@@ -254,8 +269,8 @@ class Workout:
         """Validate workout data after initialization"""
         if not self.name.strip():
             raise ValueError("Workout name cannot be empty")
-        if self.user_id <= 0:
-            raise ValueError("Valid user_id is required")
+        if self.user_id is not None and self.user_id <= 0:
+            raise ValueError("user_id must be positive when set")
         if self.duration_minutes is not None and self.duration_minutes <= 0:
             raise ValueError("Duration must be greater than 0")
         if self.comments is None:
@@ -289,7 +304,7 @@ class Workout:
             
         return cls(
             id=data.get('id'),
-            user_id=data.get('user_id', 0),
+            user_id=data.get('user_id'),
             name=data.get('name', ''),
             description=data.get('description'),
             workout_date=data.get('workout_date'),
@@ -342,10 +357,62 @@ class Workout:
         return len(self.comments or [])
 
 @dataclass
-class ExerciseSet:
-    """Exercise set within a workout data model"""
+class WorkoutSet:
+    """A set within a workout: an ordered group of exercise entries.
+
+    rest_seconds = rest after completing the set;
+    comment = optional coach's note shown to the client."""
     id: Optional[int] = None
     workout_id: int = 0
+    set_order: int = 1
+    rest_seconds: Optional[int] = None
+    comment: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    def __post_init__(self):
+        """Validate workout set data after initialization"""
+        if self.workout_id <= 0:
+            raise ValueError("Valid workout_id is required")
+        if self.set_order <= 0:
+            raise ValueError("Set order must be greater than 0")
+        if self.rest_seconds is not None and self.rest_seconds < 0:
+            raise ValueError("Rest seconds cannot be negative")
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WorkoutSet':
+        """Create WorkoutSet instance from dictionary"""
+        return cls(
+            id=data.get('id'),
+            workout_id=data.get('workout_id', 0),
+            set_order=data.get('set_order', 1),
+            rest_seconds=data.get('rest_seconds'),
+            comment=data.get('comment'),
+            created_at=data.get('created_at'),
+            updated_at=data.get('updated_at')
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert WorkoutSet instance to dictionary"""
+        return {
+            'id': self.id,
+            'workout_id': self.workout_id,
+            'set_order': self.set_order,
+            'rest_seconds': self.rest_seconds,
+            'comment': self.comment,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+@dataclass
+class ExerciseSet:
+    """One exercise entry within a workout set.
+
+    workout_set_id links the entry to its parent WorkoutSet (group);
+    set_order is the entry's position WITHIN that set."""
+    id: Optional[int] = None
+    workout_id: int = 0
+    workout_set_id: Optional[int] = None
     exercise_id: int = 0
     set_order: int = 1
     reps: Optional[int] = None
@@ -354,10 +421,11 @@ class ExerciseSet:
     distance_m: Optional[float] = None
     rest_seconds: Optional[int] = None
     completed: bool = False
+    comment: Optional[str] = None
     comments: Optional[List[Dict[str, str]]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     def __post_init__(self):
         """Validate exercise set data after initialization"""
         if self.workout_id <= 0:
@@ -406,6 +474,7 @@ class ExerciseSet:
         return cls(
             id=data.get('id'),
             workout_id=data.get('workout_id', 0),
+            workout_set_id=data.get('workout_set_id'),
             exercise_id=data.get('exercise_id', 0),
             set_order=data.get('set_order', 1),
             reps=data.get('reps'),
@@ -414,6 +483,7 @@ class ExerciseSet:
             distance_m=data.get('distance_m'),
             rest_seconds=data.get('rest_seconds'),
             completed=data.get('completed', False),
+            comment=data.get('comment'),
             comments=comments,
             created_at=data.get('created_at'),
             updated_at=data.get('updated_at')
@@ -424,6 +494,7 @@ class ExerciseSet:
         return {
             'id': self.id,
             'workout_id': self.workout_id,
+            'workout_set_id': self.workout_set_id,
             'exercise_id': self.exercise_id,
             'set_order': self.set_order,
             'reps': self.reps,
@@ -432,6 +503,7 @@ class ExerciseSet:
             'distance_m': self.distance_m,
             'rest_seconds': self.rest_seconds,
             'completed': self.completed,
+            'comment': self.comment,
             'comments': self.comments or [],
             'created_at': self.created_at,
             'updated_at': self.updated_at

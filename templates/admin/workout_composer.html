@@ -1,0 +1,205 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Workout Composer - FitCoach Admin{% endblock %}
+
+{% block content %}
+<div class="composer-page" id="composerPage">
+    <div class="page-header wc-header">
+        <div>
+            <h1><i class="fas fa-plus-circle"></i> Workout Composer</h1>
+            <p>Build a workout template — assign it to a client later</p>
+        </div>
+        <div class="wc-header-actions">
+            <button type="button" id="saveStatus" class="wc-status idle" title="Click to retry saving">
+                <i class="fas fa-circle"></i> <span id="saveStatusText">Not started</span>
+            </button>
+            <button type="button" id="cancelBtn" class="btn btn-secondary no-loading">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+            <button type="button" id="saveBtn" class="btn btn-primary no-loading">
+                <i class="fas fa-save"></i> Save
+            </button>
+        </div>
+    </div>
+
+    <div class="wc-layout">
+        <!-- Exercise library (left) -->
+        <aside class="wc-library" id="library">
+            <div class="wc-library-head">
+                <span><i class="fas fa-book"></i> Exercises</span>
+                <input type="search" id="librarySearch" placeholder="Search..." autocomplete="off">
+            </div>
+            <div class="wc-chips" id="libraryChips"></div>
+        </aside>
+
+        <!-- Workout (right) -->
+        <div class="wc-main" id="workoutColumn">
+            <div class="form-section wc-details">
+                <div class="form-group">
+                    <label for="wcName">Workout Name</label>
+                    <input type="text" id="wcName" placeholder="e.g., Full Body Strength" autocomplete="off">
+                </div>
+                <details class="wc-more">
+                    <summary>More details</summary>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wcDuration">Duration (minutes)</label>
+                            <input type="number" id="wcDuration" min="1" inputmode="numeric" placeholder="45">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="wcDescription">Description</label>
+                        <textarea id="wcDescription" rows="2" placeholder="Workout description..."></textarea>
+                    </div>
+                </details>
+            </div>
+
+            <div id="setsContainer" class="wc-sets"></div>
+
+            <div id="newSetZone" class="wc-new-set-zone">
+                <i class="fas fa-plus-circle"></i>
+                <span>Drop an exercise here to start a new set</span>
+                <button type="button" id="addSetBtn" class="btn btn-secondary btn-sm no-loading">
+                    <i class="fas fa-plus"></i> Add empty set
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* ===== Composer layout ===== */
+.wc-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.wc-header-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.wc-layout { display: block; }
+.wc-main { min-width: 0; }
+.wc-details { margin-bottom: 1rem; }
+.wc-more summary { cursor: pointer; color: var(--gray-600, #6c757d); font-size: 0.9rem; margin: 0.25rem 0 0.75rem; }
+
+/* Save status chip */
+.wc-status {
+    border: none; border-radius: 20px; padding: 0.4rem 0.9rem; font-size: 0.85rem;
+    display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; background: #e9ecef; color: #495057;
+}
+.wc-status.idle i { color: #adb5bd; }
+.wc-status.saving i { color: #ffc107; }
+.wc-status.saved i { color: #28a745; }
+.wc-status.error { background: #f8d7da; color: #842029; }
+.wc-status.error i { color: #dc3545; }
+
+/* Sets */
+.wc-sets { display: flex; flex-direction: column; gap: 0.9rem; }
+.wc-set {
+    background: white; border: 1px solid #dee2e6; border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden;
+}
+.wc-set-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.6rem 0.9rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
+}
+.wc-set-title { font-weight: 600; font-size: 0.95rem; }
+.wc-set-actions { display: flex; gap: 0.35rem; }
+.wc-icon-btn {
+    border: none; border-radius: 6px; width: 34px; height: 34px; cursor: pointer;
+    background: rgba(255,255,255,0.2); color: white; font-size: 0.85rem;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.wc-icon-btn:hover { background: rgba(255,255,255,0.35); }
+.wc-set-body { padding: 0.6rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 52px; position: relative; }
+.wc-set.wc-drop-target { outline: 3px dashed #667eea; outline-offset: -3px; }
+.wc-set-empty { color: #adb5bd; font-size: 0.85rem; font-style: italic; text-align: center; padding: 0.5rem; }
+
+/* Set meta (rest + note) */
+.wc-set-meta { display: flex; gap: 0.6rem; padding: 0 0.6rem 0.6rem; align-items: flex-end; flex-wrap: wrap; }
+.wc-set-meta .wc-param input { width: 90px; }
+.wc-note { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 0.15rem; }
+.wc-note label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: #6c757d; }
+.wc-note input {
+    width: 100%; padding: 0.45rem 0.5rem; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.88rem;
+}
+.wc-note input:focus { border-color: #667eea; outline: none; }
+
+/* Exercise entries */
+.wc-entry { background: #f8f9fa; border: 1px solid #e3e6ea; border-radius: 8px; padding: 0.55rem 0.7rem; }
+.wc-entry-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.wc-entry-name { font-weight: 600; font-size: 0.92rem; color: #343a40; }
+.wc-entry-actions { display: flex; gap: 0.3rem; flex-shrink: 0; }
+.wc-entry-actions .wc-icon-btn { background: #e9ecef; color: #495057; width: 32px; height: 32px; }
+.wc-entry-actions .wc-icon-btn:hover { background: #dde1e5; }
+.wc-entry-actions .wc-icon-btn.danger, .wc-set-actions .wc-icon-btn.danger:hover { background: #dc3545; color: white; }
+.wc-entry-params { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+.wc-entry .wc-note { margin-top: 0.5rem; }
+.wc-param { display: flex; flex-direction: column; gap: 0.15rem; }
+.wc-param label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: #6c757d; }
+.wc-param input {
+    width: 76px; padding: 0.45rem 0.5rem; border: 1px solid #ced4da; border-radius: 6px;
+    font-size: 0.9rem;
+}
+.wc-param input:focus { border-color: #667eea; outline: none; }
+input.wc-invalid { border-color: #dc3545 !important; background: #fff5f5; }
+
+/* New-set drop zone */
+.wc-new-set-zone {
+    margin-top: 0.9rem; border: 2px dashed #ced4da; border-radius: 10px; padding: 1.1rem;
+    display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+    color: #6c757d; text-align: center; font-size: 0.9rem;
+}
+.wc-new-set-zone i { font-size: 1.4rem; }
+.wc-new-set-zone.wc-drop-target { border-color: #667eea; background: #eef1fd; color: #4c5bd4; }
+
+/* Library */
+.wc-library {
+    background: white; border: 1px solid #dee2e6; border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    position: fixed; left: 0.5rem; right: 0.5rem; bottom: 0.5rem; z-index: 200;
+}
+.wc-library-head {
+    display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #eceff2; font-weight: 600; font-size: 0.9rem; color: #495057;
+}
+.wc-library-head input {
+    flex: 1; min-width: 0; padding: 0.4rem 0.6rem; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.85rem;
+}
+.wc-chips { display: flex; gap: 0.5rem; padding: 0.6rem 0.75rem; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.wc-chip {
+    flex: 0 0 auto; background: #eef1fd; border: 1px solid #cdd5f6; border-radius: 8px;
+    padding: 0.5rem 0.7rem; cursor: grab; user-select: none; -webkit-user-select: none;
+    touch-action: pan-x; max-width: 170px;
+}
+.wc-chip strong { display: block; font-size: 0.85rem; color: #3d4bbd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wc-chip small { color: #6c757d; font-size: 0.7rem; }
+.wc-chip.wc-hidden { display: none; }
+
+/* Drag ghost */
+.wc-ghost {
+    position: fixed; z-index: 1000; pointer-events: none; opacity: 0.9;
+    transform: translate(-50%, -60%) rotate(2deg); box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+}
+body.wc-dragging { cursor: grabbing; }
+body.wc-dragging * { -webkit-user-select: none; user-select: none; }
+
+/* Room for the docked library on small screens */
+.composer-page { padding-bottom: 160px; }
+
+/* ===== Desktop: library LEFT, workout RIGHT, independent scrolling ===== */
+@media (min-width: 900px) {
+    .wc-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+    .wc-library {
+        position: static; display: flex; flex-direction: column;
+        height: calc(100vh - 210px); overflow: hidden;
+    }
+    .wc-library-head { flex-wrap: wrap; }
+    .wc-chips { flex-direction: column; overflow-x: hidden; overflow-y: auto; flex: 1; }
+    .wc-chip { max-width: none; touch-action: auto; }
+    .wc-main { height: calc(100vh - 210px); overflow-y: auto; padding-right: 0.25rem; }
+    .composer-page { padding-bottom: 1rem; }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.COMPOSER_DATA = {{ composer_data | default({'exercises': []}, true) | tojson }};
+</script>
+<script src="/static/js/composer.js"></script>
+{% endblock %}

@@ -1,6 +1,6 @@
 # FitCoach - Flask Fitness Coach Application
 
-A modern Flask web application designed for fitness coaches to manage clients, workouts, and nutrition plans.
+A modern Flask web application designed for fitness coaches to manage clients and workouts.
 
 ## Features
 
@@ -8,7 +8,6 @@ A modern Flask web application designed for fitness coaches to manage clients, w
 - 📊 **Dashboard** - Overview of clients, sessions, and statistics
 - 👥 **Client Management** - Track client progress and information
 - 🏋️ **Workout Library** - Organize workout plans by categories
-- 🍎 **Nutrition Plans** - Manage dietary recommendations
 - 📱 **Responsive Design** - Mobile-friendly interface
 
 ## Quick Start
@@ -33,15 +32,15 @@ A modern Flask web application designed for fitness coaches to manage clients, w
 
 ```
 klim_fit/
-├── app.py                 # Main Flask application
+├── app.py                 # Main FastAPI application
 ├── requirements.txt       # Python dependencies
 ├── templates/            # HTML templates
-│   ├── base.html         # Base template
+│   ├── base.html         # Base template (auth pages)
 │   ├── login.html        # Login page
-│   ├── dashboard.html    # Dashboard
-│   ├── clients.html      # Client management
-│   ├── workouts.html     # Workout library
-│   └── nutrition.html    # Nutrition plans
+│   ├── signup.html       # Signup page
+│   ├── change_password.html  # Password change
+│   ├── admin/            # Admin (coach) pages
+│   └── user/             # User (client) pages
 └── static/              # Static assets
     ├── css/
     │   └── style.css     # Main stylesheet
