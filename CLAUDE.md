@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 python app.py                              # run on http://127.0.0.1:5000
 uvicorn app:app --reload --port 5000       # run with autoreload
-pip install -r requirements.txt
+uv pip install -r requirements.txt       # pip also works; uv is what the Docker build uses
 python db_tests.py                         # NOT pytest — seeds sample data into the DB
 ```
 
