@@ -102,7 +102,7 @@ async def index(request: Request):
 
 @app.get('/login', response_class=HTMLResponse)
 async def login_get(request: Request):
-    return templates.TemplateResponse('login.html', {
+    return templates.TemplateResponse(request, 'login.html', {
         'request': request,
         'messages': get_flash_messages(request)
     })
@@ -143,7 +143,7 @@ async def login_post(
 
 @app.get('/signup', response_class=HTMLResponse)
 async def signup_get(request: Request):
-    return templates.TemplateResponse('signup.html', {
+    return templates.TemplateResponse(request, 'signup.html', {
         'request': request,
         'messages': get_flash_messages(request)
     })
@@ -314,7 +314,7 @@ async def admin_dashboard(request: Request):
         # Get recent workouts
         recent_workouts = db.get_all_workouts()[:5]
 
-        return templates.TemplateResponse('admin/dashboard.html', {
+        return templates.TemplateResponse(request, 'admin/dashboard.html', {
             'request': request,
             'name': request.session.get('name'),
             'profile_picture': request.session.get('profile_picture'),
@@ -327,7 +327,7 @@ async def admin_dashboard(request: Request):
         })
     except Exception as e:
         add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
-        return templates.TemplateResponse('admin/dashboard.html', {
+        return templates.TemplateResponse(request, 'admin/dashboard.html', {
             'request': request,
             'name': request.session.get('name'),
             'messages': get_flash_messages(request)
@@ -340,7 +340,7 @@ async def admin_users(request: Request):
 
     try:
         users = db.get_all_users()
-        return templates.TemplateResponse('admin/users.html', {
+        return templates.TemplateResponse(request, 'admin/users.html', {
             'request': request,
             'name': request.session.get('name'),
             'profile_picture': request.session.get('profile_picture'),
@@ -349,7 +349,7 @@ async def admin_users(request: Request):
         })
     except Exception as e:
         add_flash_message(request, f'Error loading users: {str(e)}', 'error')
-        return templates.TemplateResponse('admin/users.html', {
+        return templates.TemplateResponse(request, 'admin/users.html', {
             'request': request,
             'name': request.session.get('name'),
             'messages': get_flash_messages(request)
@@ -373,7 +373,7 @@ async def admin_workout_composer(request: Request):
                 'has_distance_m': e.has_distance_m
             } for e in exercises]
         }
-        return templates.TemplateResponse('admin/workout_composer.html', {
+        return templates.TemplateResponse(request, 'admin/workout_composer.html', {
             'request': request,
             'name': request.session.get('name'),
             'profile_picture': request.session.get('profile_picture'),
@@ -382,7 +382,7 @@ async def admin_workout_composer(request: Request):
         })
     except Exception as e:
         add_flash_message(request, f'Error loading composer: {str(e)}', 'error')
-        return templates.TemplateResponse('admin/workout_composer.html', {
+        return templates.TemplateResponse(request, 'admin/workout_composer.html', {
             'request': request,
             'name': request.session.get('name'),
             'messages': get_flash_messages(request)
@@ -404,7 +404,7 @@ async def user_dashboard(request: Request):
         completed_workouts = len([w for w in workouts if w.completed])
         pending_workouts = total_workouts - completed_workouts
 
-        return templates.TemplateResponse('user/dashboard.html', {
+        return templates.TemplateResponse(request, 'user/dashboard.html', {
             'request': request,
             'name': request.session.get('name'),
             'profile_picture': request.session.get('profile_picture'),
@@ -416,7 +416,7 @@ async def user_dashboard(request: Request):
         })
     except Exception as e:
         add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
-        return templates.TemplateResponse('user/dashboard.html', {
+        return templates.TemplateResponse(request, 'user/dashboard.html', {
             'request': request,
             'name': request.session.get('name'),
             'messages': get_flash_messages(request)
@@ -426,7 +426,7 @@ async def user_dashboard(request: Request):
 async def change_password_get(request: Request):
     if 'user' not in request.session:
         return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse('change_password.html', {
+    return templates.TemplateResponse(request, 'change_password.html', {
         'request': request,
         'messages': get_flash_messages(request)
     })

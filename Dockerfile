@@ -4,12 +4,13 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /usr/local/bin/uv
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_NO_CACHE=1
+    UV_NO_CACHE=1 \
+    UV_PROJECT_ENVIRONMENT=/usr/local
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN uv pip install --system -r requirements.txt
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen
 
 COPY . .
 

@@ -11,10 +11,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 python app.py                              # run on http://127.0.0.1:5000
 uvicorn app:app --reload --port 5000       # run with autoreload
-uv pip install -r requirements.txt       # pip also works; uv is what the Docker build uses
+uv sync                                    # installs the exact pinned graph from uv.lock
 python db_tests.py                         # NOT pytest — seeds sample data into the DB
 ```
 
+- **Deps**: `pyproject.toml` declares them, `uv.lock` pins the whole graph (35 packages), Docker builds with `uv sync --frozen`. Python 3.14. There is no `requirements.txt` — don't reintroduce one; an unpinned transitive `starlette` bump once broke prod, which is why the lock exists.
+- **Deploy**: Railway autodeploys `main` from the `Dockerfile` (uvicorn on `$PORT`). Required service vars: `DATABASE_URL`, `SESSION_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`. Live at https://klimfit.up.railway.app
 - VS Code: `.vscode/launch.json` has a "FastAPI (uvicorn)" debugpy config (no `--reload` — the reloader subprocess breaks breakpoints).
 - API docs auto-generated at `/docs` (Swagger) and `/redoc`.
 - There is **no test suite** and **no linter config**. `db_tests.py` is a manual seeding/smoke script.
