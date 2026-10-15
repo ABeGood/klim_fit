@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+.vscode
+__pycache__
+*.pyc
+.env
+.ENV
+README.md
+CLAUDE.md
+todo
+db_tests.py
