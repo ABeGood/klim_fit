@@ -129,6 +129,7 @@ comments           id, author_id → accounts CASCADE, exactly one of workout_id
 | `POST /api/templates/{id}/assign` | Copy a ready template to each of `client_ids` (`TemplateAssign`; all validated before any copy) → `{workout_ids}` |
 | `POST /api/exercises` | Add a library exercise (`ExerciseCreate`; ≥1 `has_*`, unique name → 409) |
 | `POST /api/exercises/{id}/archive` / `restore` | Hide from / return to the library |
+| `DELETE /api/exercises/{id}` | Delete an exercise no set uses; in use → 409 (archive instead) |
 | `GET /api/workouts/{id}` | Workout + groups — **admin or owning client** |
 | `PUT/DELETE /api/workouts/{id}` | Partial update (`WorkoutUpdate`, 409 if completed) / delete |
 | `PUT /api/workout-sets/{set_id}/result` | Log `actual_*` and/or `completed` — **admin or owning client** |

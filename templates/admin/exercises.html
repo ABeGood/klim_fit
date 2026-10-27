@@ -29,6 +29,11 @@
                         {% else %}
                         <button type="button" class="ui-btn ui-btn-ghost" data-id="{{ e.id }}" onclick="setArchived(this, 'archive')">Archive</button>
                         {% endif %}
+                        {% if e.usage_count == 0 %}
+                        <button type="button" class="ui-btn ui-btn-ghost" style="color: var(--danger-ink)" data-id="{{ e.id }}" data-name="{{ e.name }}" onclick="deleteExercise(this)">Delete</button>
+                        {% else %}
+                        <button type="button" class="ui-btn ui-btn-ghost" style="color: var(--faint)" data-name="{{ e.name }}" data-used="{{ e.usage_count }}" onclick="explainInUse(this)" title="In use — archive instead">Delete</button>
+                        {% endif %}
                     </td>
                 </tr>
                 {% else %}
@@ -76,6 +81,21 @@ document.getElementById('newExercise').addEventListener('submit', async (e) => {
         FitCoach.notify('Could not add: ' + err.message, 'error');
     }
 });
+
+async function deleteExercise(btn) {
+    if (!confirm('Delete "' + btn.dataset.name + '" from the library? This can\'t be undone.')) return;
+    try {
+        await FitCoach.api('/api/exercises/' + btn.dataset.id, 'DELETE');
+        location.reload();
+    } catch (err) {
+        FitCoach.notify('Could not delete: ' + err.message, 'error');
+    }
+}
+
+function explainInUse(btn) {
+    FitCoach.notify('"' + btn.dataset.name + '" is used in ' + btn.dataset.used + ' set(s) of templates or client workouts, ' +
+                    'so deleting it would erase that history. Archive it instead to hide it from the composer.', 'info');
+}
 
 async function setArchived(btn, action) {
     try {

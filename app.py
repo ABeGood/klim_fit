@@ -581,6 +581,19 @@ async def api_restore_exercise(request: Request, exercise_id: int):
         raise HTTPException(status_code=404, detail='Exercise not found')
     return {'message': 'Exercise restored'}
 
+@app.delete('/api/exercises/{exercise_id}')
+async def api_delete_exercise(request: Request, exercise_id: int):
+    """Delete an exercise nothing uses; one in a template or workout is kept (409) -- archive it instead"""
+    require_admin(request)
+    if not db.get_exercise(exercise_id):
+        raise HTTPException(status_code=404, detail='Exercise not found')
+    used = db.get_exercise_usage(exercise_id)
+    if used:
+        raise HTTPException(status_code=409, detail=f'Used in {used} set{"s" if used != 1 else ""} of templates or '
+                                                    'client workouts, so it can\'t be deleted -- archive it instead')
+    db.delete_exercise(exercise_id)
+    return {'message': 'Exercise deleted'}
+
 @app.get('/api/clients')
 async def api_clients(request: Request):
     require_admin(request)

@@ -463,6 +463,13 @@ class DatabaseManager:
         return self._execute("UPDATE exercises SET archived_at = CURRENT_TIMESTAMP WHERE id = %s;",
                              (exercise_id,)) > 0
 
+    def get_exercise_usage(self, exercise_id: int) -> int:
+        """How many template + workout sets use an exercise (0 = safe to delete)"""
+        return self._count("""
+            SELECT (SELECT COUNT(*) FROM template_sets WHERE exercise_id = %s)
+                 + (SELECT COUNT(*) FROM workout_sets WHERE exercise_id = %s) AS count;
+            """, (exercise_id, exercise_id))
+
     def delete_exercise(self, exercise_id: int) -> bool:
         """Delete an exercise; raises (RESTRICT) if any template or workout set uses it -- archive instead"""
         return self._execute("DELETE FROM exercises WHERE id = %s;", (exercise_id,)) > 0
