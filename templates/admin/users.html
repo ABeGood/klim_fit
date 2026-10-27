@@ -1,12 +1,12 @@
 {% extends "admin/base.html" %}
 
-{% block title %}Users Management - FitCoach Admin{% endblock %}
+{% block title %}Clients - FitCoach Admin{% endblock %}
 
 {% block content %}
 <div class="users-page">
     <div class="page-header">
-        <h1><i class="fas fa-users"></i> Users Management</h1>
-        <p>Manage all registered users</p>
+        <h1><i class="fas fa-users"></i> Clients</h1>
+        <p>All registered clients and their workouts</p>
     </div>
 
     {% if users %}
@@ -14,7 +14,7 @@
         <table class="users-table">
             <thead>
                 <tr>
-                    <th>User</th>
+                    <th>Client</th>
                     <th>Email</th>
                     <th>Age</th>
                     <th>Weight (kg)</th>
@@ -30,7 +30,7 @@
                             {% if user.profile_picture %}
                             <img src="{{ user.profile_picture }}" alt="{{ user.full_name }}" class="table-avatar">
                             {% else %}
-                            <div class="table-avatar-placeholder">{{ user.name[0] }}{{ user.surname[0] }}</div>
+                            <div class="table-avatar-placeholder">{{ user.name[:1] }}{{ user.surname[:1] }}</div>
                             {% endif %}
                             <span>{{ user.full_name }}</span>
                         </div>
@@ -41,11 +41,12 @@
                     <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
                     <td>
                         <div class="action-buttons-inline">
-                            <a href="/api/users/{{ user.id }}/workouts" class="btn-sm" onclick="viewUserWorkouts({{ user.id }}, '{{ user.full_name }}'); return false;">
+                            <button type="button" class="btn-sm no-loading" data-id="{{ user.id }}"
+                                    data-name="{{ user.full_name }}" onclick="viewUserWorkouts(this)">
                                 <i class="fas fa-dumbbell"></i> Workouts
-                            </a>
-                            <a href="/admin/workout-composer" class="btn-sm btn-primary">
-                                <i class="fas fa-plus"></i> New Workout
+                            </button>
+                            <a href="/admin/templates" class="btn-sm btn-primary">
+                                <i class="fas fa-user-plus"></i> Assign
                             </a>
                         </div>
                     </td>
@@ -57,8 +58,8 @@
     {% else %}
     <div class="empty-state-large">
         <i class="fas fa-users fa-4x"></i>
-        <h2>No Users Yet</h2>
-        <p>Users will appear here when they sign up</p>
+        <h2>No Clients Yet</h2>
+        <p>Clients will appear here when they sign up</p>
     </div>
     {% endif %}
 </div>
@@ -92,17 +93,25 @@ window.onclick = function(event) {
     }
 }
 
-async function viewUserWorkouts(userId, userName) {
-    document.getElementById('modalUserName').textContent = `${userName}'s Workouts`;
-    document.getElementById('modalWorkoutsContent').innerHTML = '<div class="loading">Loading...</div>';
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+}
+
+async function viewUserWorkouts(btn) {
+    const content = document.getElementById('modalWorkoutsContent');
+    document.getElementById('modalUserName').textContent = `${btn.dataset.name}'s Workouts`;
+    content.innerHTML = '<div class="loading">Loading...</div>';
     modal.style.display = 'block';
 
     try {
-        const response = await fetch(`/api/users/${userId}/workouts`);
+        const response = await fetch(`/api/clients/${btn.dataset.id}/workouts`);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
         const workouts = await response.json();
 
         if (workouts.length === 0) {
-            document.getElementById('modalWorkoutsContent').innerHTML = '<p class="empty-state">No workouts assigned yet</p>';
+            content.innerHTML = '<p class="empty-state">No workouts assigned yet</p>';
             return;
         }
 
@@ -111,24 +120,28 @@ async function viewUserWorkouts(userId, userName) {
             const statusIcon = workout.completed ?
                 '<i class="fas fa-check-circle" style="color: var(--success-color);"></i>' :
                 '<i class="fas fa-clock" style="color: var(--warning-color);"></i>';
+            const date = workout.scheduled_date || 'Not scheduled';  // plain YYYY-MM-DD, no timezone shift
 
             html += `
                 <div class="workout-item-modal">
                     ${statusIcon}
                     <div class="workout-details">
-                        <h4>${workout.name}</h4>
-                        <p>${workout.description || 'No description'}</p>
-                        <small>Date: ${new Date(workout.workout_date).toLocaleDateString()}</small>
-                        ${workout.duration_minutes ? `<small> | Duration: ${workout.duration_minutes} min</small>` : ''}
+                        <h4>${escapeHtml(workout.name)}</h4>
+                        <p>${escapeHtml(workout.description || 'No description')}</p>
+                        <small>Date: ${date} | ${workout.completed_set_count}/${workout.set_count} sets done</small>
+                        <div class="action-buttons-inline">
+                            <a href="/workouts/${workout.id}" class="btn-sm"><i class="fas fa-eye"></i> Open</a>
+                            ${workout.completed ? '' : `<a href="/admin/workout-composer?workout_id=${workout.id}" class="btn-sm"><i class="fas fa-edit"></i> Edit</a>`}
+                        </div>
                     </div>
                 </div>
             `;
         });
         html += '</div>';
 
-        document.getElementById('modalWorkoutsContent').innerHTML = html;
+        content.innerHTML = html;
     } catch (error) {
-        document.getElementById('modalWorkoutsContent').innerHTML = '<p class="error">Failed to load workouts</p>';
+        content.innerHTML = '<p class="error">Failed to load workouts</p>';
     }
 }
 </script>

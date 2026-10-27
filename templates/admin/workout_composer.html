@@ -6,8 +6,17 @@
 <div class="composer-page" id="composerPage">
     <div class="page-header wc-header">
         <div>
-            <h1><i class="fas fa-plus-circle"></i> Workout Composer</h1>
-            <p>Build a workout template — assign it to a client later</p>
+            {% set target = composer_data.target if composer_data else none %}
+            {% if target and target.kind == 'workouts' %}
+            <h1><i class="fas fa-edit"></i> Edit Workout</h1>
+            <p>{{ target.client_name }}'s workout — changes apply to this client only</p>
+            {% elif target %}
+            <h1><i class="fas fa-edit"></i> Edit Template</h1>
+            <p>Changes apply to future assignments only{% if target.status == 'draft' %} — press Save to make it ready{% endif %}</p>
+            {% else %}
+            <h1><i class="fas fa-plus-circle"></i> New Template</h1>
+            <p>Build a workout template — assign it to clients later</p>
+            {% endif %}
         </div>
         <div class="wc-header-actions">
             <button type="button" id="saveStatus" class="wc-status idle" title="Click to retry saving">
@@ -46,21 +55,31 @@
                             <label for="wcDuration">Duration (minutes)</label>
                             <input type="number" id="wcDuration" min="1" inputmode="numeric" placeholder="45">
                         </div>
+                        {% if target and target.kind == 'workouts' %}
+                        <div class="form-group">
+                            <label for="wcDate">Scheduled date</label>
+                            <input type="date" id="wcDate">
+                        </div>
+                        {% endif %}
                     </div>
                     <div class="form-group">
                         <label for="wcDescription">Description</label>
                         <textarea id="wcDescription" rows="2" placeholder="Workout description..."></textarea>
                     </div>
+                    <div class="form-group">
+                        <label for="wcNote">Note to client</label>
+                        <input type="text" id="wcNote" maxlength="500" placeholder="Optional note for the whole workout..." autocomplete="off">
+                    </div>
                 </details>
             </div>
 
-            <div id="setsContainer" class="wc-sets"></div>
+            <div id="groupsContainer" class="wc-sets"></div>
 
-            <div id="newSetZone" class="wc-new-set-zone">
+            <div id="newGroupZone" class="wc-new-set-zone">
                 <i class="fas fa-plus-circle"></i>
-                <span>Drop an exercise here to start a new set</span>
-                <button type="button" id="addSetBtn" class="btn btn-secondary btn-sm no-loading">
-                    <i class="fas fa-plus"></i> Add empty set
+                <span>Drop an exercise here to start a new group</span>
+                <button type="button" id="addGroupBtn" class="btn btn-secondary btn-sm no-loading">
+                    <i class="fas fa-plus"></i> Add empty group
                 </button>
             </div>
         </div>
@@ -97,7 +116,12 @@
     display: flex; justify-content: space-between; align-items: center;
     padding: 0.6rem 0.9rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
 }
-.wc-set-title { font-weight: 600; font-size: 0.95rem; }
+.wc-group-name {
+    flex: 1; min-width: 0; margin-right: 0.5rem; background: transparent; border: 1px solid transparent;
+    border-radius: 6px; color: white; font-weight: 600; font-size: 0.95rem; padding: 0.3rem 0.4rem;
+}
+.wc-group-name::placeholder { color: rgba(255,255,255,0.85); }
+.wc-group-name:hover, .wc-group-name:focus { border-color: rgba(255,255,255,0.5); outline: none; background: rgba(255,255,255,0.12); }
 .wc-set-actions { display: flex; gap: 0.35rem; }
 .wc-icon-btn {
     border: none; border-radius: 6px; width: 34px; height: 34px; cursor: pointer;
@@ -109,7 +133,7 @@
 .wc-set.wc-drop-target { outline: 3px dashed #667eea; outline-offset: -3px; }
 .wc-set-empty { color: #adb5bd; font-size: 0.85rem; font-style: italic; text-align: center; padding: 0.5rem; }
 
-/* Set meta (rest + note) */
+/* Group meta (note) */
 .wc-set-meta { display: flex; gap: 0.6rem; padding: 0 0.6rem 0.6rem; align-items: flex-end; flex-wrap: wrap; }
 .wc-set-meta .wc-param input { width: 90px; }
 .wc-note { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 0.15rem; }
@@ -119,7 +143,7 @@
 }
 .wc-note input:focus { border-color: #667eea; outline: none; }
 
-/* Exercise entries */
+/* Sets */
 .wc-entry { background: #f8f9fa; border: 1px solid #e3e6ea; border-radius: 8px; padding: 0.55rem 0.7rem; }
 .wc-entry-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 .wc-entry-name { font-weight: 600; font-size: 0.92rem; color: #343a40; }
@@ -138,7 +162,7 @@
 .wc-param input:focus { border-color: #667eea; outline: none; }
 input.wc-invalid { border-color: #dc3545 !important; background: #fff5f5; }
 
-/* New-set drop zone */
+/* New-group drop zone */
 .wc-new-set-zone {
     margin-top: 0.9rem; border: 2px dashed #ced4da; border-radius: 10px; padding: 1.1rem;
     display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
@@ -199,7 +223,7 @@ body.wc-dragging * { -webkit-user-select: none; user-select: none; }
 
 {% block scripts %}
 <script>
-    window.COMPOSER_DATA = {{ composer_data | default({'exercises': []}, true) | tojson }};
+    window.COMPOSER_DATA = {{ composer_data | default({'exercises': [], 'target': none, 'groups': []}, true) | tojson }};
 </script>
 <script src="/static/js/composer.js"></script>
 {% endblock %}

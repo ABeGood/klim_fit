@@ -6,7 +6,7 @@
 <div class="dashboard">
     <div class="dashboard-header">
         <h1>Admin Dashboard</h1>
-        <p>Manage users, workouts, and exercises</p>
+        <p>Manage clients, templates, and workouts</p>
     </div>
 
     <!-- Statistics Cards -->
@@ -16,8 +16,18 @@
                 <i class="fas fa-users"></i>
             </div>
             <div class="stat-info">
-                <h3>{{ total_users }}</h3>
-                <p>Total Users</p>
+                <h3>{{ total_clients }}</h3>
+                <p>Clients</p>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-clipboard-list"></i>
+            </div>
+            <div class="stat-info">
+                <h3>{{ total_templates }}</h3>
+                <p>Templates</p>
             </div>
         </div>
 
@@ -27,7 +37,7 @@
             </div>
             <div class="stat-info">
                 <h3>{{ total_workouts }}</h3>
-                <p>Total Workouts</p>
+                <p>Assigned Workouts</p>
             </div>
         </div>
 
@@ -48,52 +58,52 @@
         <div class="action-buttons">
             <a href="/admin/workout-composer" class="action-btn">
                 <i class="fas fa-plus-circle"></i>
-                <span>Create Workout</span>
+                <span>New Template</span>
+            </a>
+            <a href="/admin/templates" class="action-btn">
+                <i class="fas fa-clipboard-list"></i>
+                <span>Templates &amp; Assign</span>
             </a>
             <a href="/admin/users" class="action-btn">
                 <i class="fas fa-users"></i>
-                <span>Manage Users</span>
-            </a>
-            <a href="/api/exercises" class="action-btn" target="_blank">
-                <i class="fas fa-running"></i>
-                <span>View Exercises</span>
+                <span>Clients</span>
             </a>
         </div>
     </div>
 
     <div class="dashboard-grid">
-        <!-- Recent Users -->
+        <!-- Recent Clients -->
         <div class="dashboard-card">
-            <h2><i class="fas fa-user-friends"></i> Recent Users</h2>
-            {% if recent_users %}
+            <h2><i class="fas fa-user-friends"></i> Recent Clients</h2>
+            {% if recent_clients %}
             <div class="users-list">
-                {% for user in recent_users %}
+                {% for user in recent_clients %}
                 <div class="user-item">
                     {% if user.profile_picture %}
                     <img src="{{ user.profile_picture }}" alt="{{ user.full_name }}" class="user-avatar">
                     {% else %}
-                    <div class="user-avatar-placeholder">{{ user.name[0] }}{{ user.surname[0] }}</div>
+                    <div class="user-avatar-placeholder">{{ user.name[:1] }}{{ user.surname[:1] }}</div>
                     {% endif %}
                     <div class="user-info">
                         <strong>{{ user.full_name }}</strong>
                         <small>{{ user.email }}</small>
                     </div>
-                    <a href="/admin/users?user_id={{ user.id }}" class="btn-sm">View</a>
+                    <a href="/admin/users" class="btn-sm">View</a>
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <p class="empty-state">No users yet</p>
+            <p class="empty-state">No clients yet</p>
             {% endif %}
         </div>
 
-        <!-- Recent Workouts -->
+        <!-- Recently Assigned Workouts -->
         <div class="dashboard-card">
-            <h2><i class="fas fa-history"></i> Recent Workouts</h2>
+            <h2><i class="fas fa-history"></i> Recently Assigned</h2>
             {% if recent_workouts %}
             <div class="workouts-list">
                 {% for workout in recent_workouts %}
-                <div class="workout-item">
+                <a href="/workouts/{{ workout.id }}" class="workout-item">
                     <div class="workout-icon">
                         {% if workout.completed %}
                         <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
@@ -103,13 +113,13 @@
                     </div>
                     <div class="workout-info">
                         <strong>{{ workout.name }}</strong>
-                        <small>{{ workout.description[:50] }}...</small>
+                        <small>{{ workout.client_name }} · {{ workout.completed_set_count }}/{{ workout.set_count }} sets done</small>
                     </div>
-                </div>
+                </a>
                 {% endfor %}
             </div>
             {% else %}
-            <p class="empty-state">No workouts yet</p>
+            <p class="empty-state">No workouts assigned yet</p>
             {% endif %}
         </div>
     </div>

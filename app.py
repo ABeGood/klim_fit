@@ -1,15 +1,18 @@
-from fastapi import FastAPI, Request, Form, HTTPException, Depends, status
+from fastapi import FastAPI, Request, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.encoders import jsonable_encoder
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from database_manager import DatabaseManager
-from models import User, Workout, ExerciseSet, Exercise
-from pydantic import BaseModel
+from models import Account, WorkoutTemplate, Comment
+from pydantic import BaseModel, Field
 from typing import Optional, List
+from enum import Enum
+from datetime import date
 import os
-from datetime import datetime
+import psycopg2
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -40,38 +43,92 @@ db = DatabaseManager()
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Pydantic models for API requests
-class WorkoutCreate(BaseModel):
-    user_id: Optional[int] = None  # None = unassigned template
+# ============ API error mapping ============
+# API routes don't wrap themselves in try/except: model validation errors (ValueError) become 400,
+# constraint violations 409, anything else the default 500. Page routes still catch their own errors.
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    return JSONResponse(status_code=400, content={'detail': str(exc)})
+
+@app.exception_handler(psycopg2.IntegrityError)
+async def integrity_error_handler(request: Request, exc: psycopg2.IntegrityError):
+    return JSONResponse(status_code=409, content={'detail': exc.pgerror or str(exc)})
+
+# ============ Pydantic request models ============
+# Update bodies are applied with model_dump(exclude_unset=True): a field that is absent is left alone,
+# an explicit null clears it.
+POSITIVE_INT = Field(None, gt=0)
+POSITIVE_FLOAT = Field(None, gt=0)
+
+class Kind(str, Enum):
+    templates = 'templates'
+    workouts = 'workouts'
+
+class TemplateCreate(BaseModel):
     name: str
-    description: str = ""
-    duration_minutes: Optional[int] = None
+    description: Optional[str] = None
+    duration_minutes: Optional[int] = POSITIVE_INT
+    note: Optional[str] = None
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    duration_minutes: Optional[int] = POSITIVE_INT
+    note: Optional[str] = None
+    status: Optional[str] = None
+
+class TemplateAssign(BaseModel):
+    client_id: int
+    scheduled_date: Optional[date] = None
 
 class WorkoutUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    duration_minutes: Optional[int] = None
+    duration_minutes: Optional[int] = POSITIVE_INT
+    note: Optional[str] = None
+    scheduled_date: Optional[date] = None
 
-class WorkoutAssign(BaseModel):
-    user_id: int
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    note: Optional[str] = None
 
-class WorkoutSetUpdate(BaseModel):
-    rest_seconds: Optional[int] = None
-    comment: Optional[str] = None
-
-class ExerciseSetCreate(BaseModel):
+class SetCreate(BaseModel):
     exercise_id: int
 
-class ExerciseSetUpdate(BaseModel):
-    reps: Optional[int] = None
-    weight_kg: Optional[float] = None
-    duration_s: Optional[int] = None
-    distance_m: Optional[float] = None
-    rest_seconds: Optional[int] = None
-    completed: Optional[bool] = None
-    comment: Optional[str] = None
+class SetUpdate(BaseModel):
+    target_reps: Optional[int] = POSITIVE_INT
+    target_weight_kg: Optional[float] = POSITIVE_FLOAT
+    target_duration_s: Optional[int] = POSITIVE_INT
+    target_distance_m: Optional[float] = POSITIVE_FLOAT
+    rest_seconds: Optional[int] = Field(None, ge=0)
+    note: Optional[str] = None
 
-# Helper functions for flash messages and auth
+class SetResult(BaseModel):
+    actual_reps: Optional[int] = POSITIVE_INT
+    actual_weight_kg: Optional[float] = POSITIVE_FLOAT
+    actual_duration_s: Optional[int] = POSITIVE_INT
+    actual_distance_m: Optional[float] = POSITIVE_FLOAT
+    completed: Optional[bool] = None
+
+class OrderUpdate(BaseModel):
+    ids: List[int]
+
+class CommentCreate(BaseModel):
+    body: str
+    group_id: Optional[int] = None  # neither group_id nor set_id = comment on the whole workout
+    set_id: Optional[int] = None
+
+def changes_from(body: BaseModel) -> dict:
+    """Fields the caller actually sent; blank text clears the value, a blank name is rejected"""
+    changes = body.model_dump(exclude_unset=True)
+    for key, value in changes.items():
+        if isinstance(value, str):
+            changes[key] = value.strip() or None
+    if 'name' in changes and not changes['name']:
+        raise HTTPException(status_code=400, detail='Name cannot be empty')
+    return changes
+
+# ============ Helpers: flash messages, session, auth ============
 def get_flash_messages(request: Request):
     return request.session.pop('_flash_messages', [])
 
@@ -80,20 +137,68 @@ def add_flash_message(request: Request, message: str, category: str = 'info'):
         request.session['_flash_messages'] = []
     request.session['_flash_messages'].append({'message': message, 'category': category})
 
-def get_current_user(request: Request):
-    if 'user' not in request.session:
-        return None
-    return request.session.get('user')
+def start_session(request: Request, account: Account, profile_picture: Optional[str] = None):
+    """The one place the session is filled (password login, signup, Google OAuth)"""
+    request.session['user'] = account.email
+    request.session['user_id'] = account.id
+    request.session['name'] = account.full_name
+    request.session['user_type'] = 'admin' if account.is_admin else 'user'
+    picture = profile_picture or account.profile_picture
+    if picture:
+        request.session['profile_picture'] = picture
 
-def require_auth(request: Request):
-    if 'user' not in request.session:
-        raise HTTPException(status_code=status.HTTP_302_FOUND, headers={'Location': '/login'})
-    return request.session
+def is_admin(request: Request) -> bool:
+    return 'user' in request.session and request.session.get('user_type') == 'admin'
 
 def require_admin(request: Request):
-    if 'user' not in request.session or request.session.get('user_type') != 'admin':
+    if not is_admin(request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
 
+def require_login(request: Request):
+    if 'user' not in request.session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
+
+def page_context(request: Request, **extra):
+    """Context every logged-in page template needs"""
+    return dict(request=request, name=request.session.get('name'),
+                profile_picture=request.session.get('profile_picture'),
+                messages=get_flash_messages(request), **extra)
+
+def get_accessible_workout(request: Request, workout_id: int):
+    """The workout if the caller is an admin or the client who owns it; 404 otherwise
+    (404 rather than 403 so ids of other clients' workouts aren't confirmed)"""
+    require_login(request)
+    workout = db.get_workout(workout_id)
+    if not workout or (not is_admin(request) and workout.client_id != request.session.get('user_id')):
+        raise HTTPException(status_code=404, detail='Workout not found')
+    return workout
+
+def check_editable(kind: Kind, owner_id: Optional[int]):
+    """404 if the template/workout doesn't exist; 409 if it's a completed (frozen) workout"""
+    if owner_id is None:
+        raise HTTPException(status_code=404, detail='Not found')
+    if kind == Kind.templates:
+        if not db.get_template(owner_id):
+            raise HTTPException(status_code=404, detail='Template not found')
+    else:
+        workout = db.get_workout(owner_id)
+        if not workout:
+            raise HTTPException(status_code=404, detail='Workout not found')
+        if workout.completed:
+            raise HTTPException(status_code=409, detail='Workout is completed and can no longer be edited')
+
+def exercise_dict(exercise) -> dict:
+    return {
+        'id': exercise.id,
+        'name': exercise.name,
+        'description': exercise.description or '',
+        'has_reps': exercise.has_reps,
+        'has_weight_kg': exercise.has_weight_kg,
+        'has_duration_s': exercise.has_duration_s,
+        'has_distance_m': exercise.has_distance_m
+    }
+
+# ============ Auth pages ============
 @app.get('/', response_class=RedirectResponse)
 async def index(request: Request):
     if 'user' in request.session:
@@ -114,23 +219,9 @@ async def login_post(
     password: str = Form(...)
 ):
     try:
-        # Try to authenticate as admin first
-        admin = db.authenticate_admin(email, password)
-        if admin:
-            request.session['user'] = email
-            request.session['user_id'] = admin.id
-            request.session['name'] = admin.full_name
-            request.session['user_type'] = 'admin'
-            add_flash_message(request, 'Login successful!', 'success')
-            return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
-
-        # Try to authenticate as regular user
-        user = db.authenticate_user(email, password)
-        if user:
-            request.session['user'] = email
-            request.session['user_id'] = user.id
-            request.session['name'] = user.full_name
-            request.session['user_type'] = 'user'
+        account = db.authenticate(email, password)
+        if account:
+            start_session(request, account)
             add_flash_message(request, 'Login successful!', 'success')
             return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
 
@@ -169,31 +260,22 @@ async def signup_post(
         return RedirectResponse(url='/signup', status_code=status.HTTP_302_FOUND)
 
     try:
-        # Check if user already exists
-        existing_user = db.get_user_by_email(email)
-        existing_admin = db.get_admin_by_email(email)
-
-        if existing_user or existing_admin:
+        if db.get_account_by_email(email):
             add_flash_message(request, 'Email already registered! Please use a different email.', 'error')
             return RedirectResponse(url='/signup', status_code=status.HTTP_302_FOUND)
 
-        # Create new user
-        new_user = User(
+        # Signup only ever creates clients; admins are created by seeding/DB
+        account = db.create_account(Account(
+            role='client',
             name=name.strip(),
             surname=surname.strip(),
             email=email.strip().lower(),
             age=int(age) if age else None,
             weight_kg=float(weight_kg) if weight_kg else None
-        )
-
-        created_user = db.create_user(new_user, password)
+        ), password)
 
         # Auto-login after successful registration
-        request.session['user'] = created_user.email
-        request.session['user_id'] = created_user.id
-        request.session['name'] = created_user.full_name
-        request.session['user_type'] = 'user'
-
+        start_session(request, account)
         add_flash_message(request, 'Account created successfully! Welcome to FitCoach!', 'success')
         return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
 
@@ -215,7 +297,7 @@ async def google_login(request: Request):
 
 @app.get('/auth/google/callback')
 async def google_callback(request: Request):
-    """Handle Google OAuth callback"""
+    """Handle Google OAuth callback: match by Google ID, then by email (linking), else create a client"""
     try:
         token = await oauth.google.authorize_access_token(request)
         user_info = token.get('userinfo')
@@ -226,60 +308,29 @@ async def google_callback(request: Request):
 
         email = user_info.get('email')
         google_id = user_info.get('sub')
-        given_name = user_info.get('given_name', '')
-        family_name = user_info.get('family_name', '')
         picture = user_info.get('picture')
 
-        # Try to find existing user or admin by Google ID or email
-        user = db.get_user_by_google_id(google_id)
-        admin = db.get_admin_by_google_id(google_id) if not user else None
+        account = db.get_account_by_google_id(google_id)
+        if not account:
+            account = db.get_account_by_email(email)
+            if account:
+                db.update_account_google_info(account.id, google_id, picture)
 
-        if not user and not admin:
-            # Try by email
-            user = db.get_user_by_email(email)
-            admin = db.get_admin_by_email(email) if not user else None
-
-        # If found, update Google ID and profile picture
-        if user:
-            if not user.google_id:
-                db.update_user_google_info(user.id, google_id, picture)
-            request.session['user'] = email
-            request.session['user_id'] = user.id
-            request.session['name'] = user.full_name
-            request.session['user_type'] = 'user'
-            request.session['profile_picture'] = picture
+        if account:
+            start_session(request, account, picture)
             add_flash_message(request, 'Login successful!', 'success')
-            return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
-
-        elif admin:
-            if not admin.google_id:
-                db.update_admin_google_info(admin.id, google_id, picture)
-            request.session['user'] = email
-            request.session['user_id'] = admin.id
-            request.session['name'] = admin.full_name
-            request.session['user_type'] = 'admin'
-            request.session['profile_picture'] = picture
-            add_flash_message(request, 'Login successful!', 'success')
-            return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
-
         else:
-            # Create new user account
-            new_user = User(
-                name=given_name,
-                surname=family_name,
+            account = db.create_account(Account(
+                role='client',
+                name=user_info.get('given_name', ''),
+                surname=user_info.get('family_name', ''),
                 email=email,
                 google_id=google_id,
                 profile_picture=picture
-            )
-            created_user = db.create_user_with_google(new_user)
-
-            request.session['user'] = email
-            request.session['user_id'] = created_user.id
-            request.session['name'] = created_user.full_name
-            request.session['user_type'] = 'user'
-            request.session['profile_picture'] = picture
+            ))
+            start_session(request, account, picture)
             add_flash_message(request, 'Account created successfully! Welcome!', 'success')
-            return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
+        return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
 
     except Exception as e:
         print(f"OAuth error: {str(e)}")
@@ -292,137 +343,9 @@ async def dashboard(request: Request):
         return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
 
     # Redirect based on user type
-    user_type = request.session.get('user_type', 'user')
-    if user_type == 'admin':
+    if is_admin(request):
         return RedirectResponse(url='/admin/dashboard', status_code=status.HTTP_302_FOUND)
-    else:
-        return RedirectResponse(url='/user/dashboard', status_code=status.HTTP_302_FOUND)
-
-# ============ ADMIN ROUTES ============
-@app.get('/admin/dashboard', response_class=HTMLResponse)
-async def admin_dashboard(request: Request):
-    if 'user' not in request.session or request.session.get('user_type') != 'admin':
-        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
-
-    try:
-        # Get statistics
-        total_users = len(db.get_all_users())
-        total_workouts = db.get_workout_count()
-        total_exercises = len(db.get_all_exercises())
-
-        # Get recent users
-        recent_users = db.get_all_users()[:5]
-
-        # Get recent workouts
-        recent_workouts = db.get_all_workouts()[:5]
-
-        return templates.TemplateResponse(request, 'admin/dashboard.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'profile_picture': request.session.get('profile_picture'),
-            'total_users': total_users,
-            'total_workouts': total_workouts,
-            'total_exercises': total_exercises,
-            'recent_users': recent_users,
-            'recent_workouts': recent_workouts,
-            'messages': get_flash_messages(request)
-        })
-    except Exception as e:
-        add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'admin/dashboard.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'messages': get_flash_messages(request)
-        })
-
-@app.get('/admin/users', response_class=HTMLResponse)
-async def admin_users(request: Request):
-    if 'user' not in request.session or request.session.get('user_type') != 'admin':
-        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
-
-    try:
-        users = db.get_all_users()
-        return templates.TemplateResponse(request, 'admin/users.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'profile_picture': request.session.get('profile_picture'),
-            'users': users,
-            'messages': get_flash_messages(request)
-        })
-    except Exception as e:
-        add_flash_message(request, f'Error loading users: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'admin/users.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'messages': get_flash_messages(request)
-        })
-
-@app.get('/admin/workout-composer', response_class=HTMLResponse)
-async def admin_workout_composer(request: Request):
-    if 'user' not in request.session or request.session.get('user_type') != 'admin':
-        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
-
-    try:
-        exercises = db.get_all_exercises()
-        composer_data = {
-            'exercises': [{
-                'id': e.id,
-                'name': e.name,
-                'description': e.description or '',
-                'has_reps': e.has_reps,
-                'has_weight_kg': e.has_weight_kg,
-                'has_duration_s': e.has_duration_s,
-                'has_distance_m': e.has_distance_m
-            } for e in exercises]
-        }
-        return templates.TemplateResponse(request, 'admin/workout_composer.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'profile_picture': request.session.get('profile_picture'),
-            'composer_data': composer_data,
-            'messages': get_flash_messages(request)
-        })
-    except Exception as e:
-        add_flash_message(request, f'Error loading composer: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'admin/workout_composer.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'messages': get_flash_messages(request)
-        })
-
-# ============ USER ROUTES ============
-@app.get('/user/dashboard', response_class=HTMLResponse)
-async def user_dashboard(request: Request):
-    if 'user' not in request.session or request.session.get('user_type') != 'user':
-        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
-
-    try:
-        user_id = request.session.get('user_id')
-        # Get user's workouts
-        workouts = db.get_workouts_by_user(user_id)
-
-        # Calculate statistics
-        total_workouts = len(workouts)
-        completed_workouts = len([w for w in workouts if w.completed])
-        pending_workouts = total_workouts - completed_workouts
-
-        return templates.TemplateResponse(request, 'user/dashboard.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'profile_picture': request.session.get('profile_picture'),
-            'workouts': workouts,
-            'total_workouts': total_workouts,
-            'completed_workouts': completed_workouts,
-            'pending_workouts': pending_workouts,
-            'messages': get_flash_messages(request)
-        })
-    except Exception as e:
-        add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'user/dashboard.html', {
-            'request': request,
-            'name': request.session.get('name'),
-            'messages': get_flash_messages(request)
-        })
+    return RedirectResponse(url='/user/dashboard', status_code=status.HTTP_302_FOUND)
 
 @app.get('/change_password', response_class=HTMLResponse)
 async def change_password_get(request: Request):
@@ -448,22 +371,9 @@ async def change_password_post(
         return RedirectResponse(url='/change_password', status_code=status.HTTP_302_FOUND)
 
     try:
-        user_email = request.session['user']
-        user_type = request.session.get('user_type', 'user')
-
-        # Verify current password
-        if user_type == 'admin':
-            authenticated = db.authenticate_admin(user_email, current_password)
-            if authenticated:
-                success = db.change_admin_password(request.session['user_id'], new_password)
-        else:
-            authenticated = db.authenticate_user(user_email, current_password)
-            if authenticated:
-                success = db.change_user_password(request.session['user_id'], new_password)
-
-        if not authenticated:
+        if not db.authenticate(request.session['user'], current_password):
             add_flash_message(request, 'Current password is incorrect!', 'error')
-        elif success:
+        elif db.change_password(request.session['user_id'], new_password):
             add_flash_message(request, 'Password changed successfully!', 'success')
             return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
         else:
@@ -474,387 +384,344 @@ async def change_password_post(
 
     return RedirectResponse(url='/change_password', status_code=status.HTTP_302_FOUND)
 
-# API Routes for Workout Management
-@app.get('/api/users')
-async def api_users(request: Request):
-    require_admin(request)
-
-    try:
-        users = db.get_all_users()
-        return [{
-            'id': user.id,
-            'name': user.name,
-            'surname': user.surname,
-            'email': user.email,
-            'full_name': user.full_name,
-            'age': user.age,
-            'weight_kg': user.weight_kg
-        } for user in users]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get('/api/users/{user_id}/workouts')
-async def api_user_workouts(request: Request, user_id: int):
-    require_admin(request)
-
-    try:
-        workouts = db.get_workouts_by_user(user_id)
-        return [{
-            'id': workout.id,
-            'name': workout.name,
-            'description': workout.description,
-            'workout_date': workout.workout_date.isoformat() if workout.workout_date else None,
-            'duration_minutes': workout.duration_minutes,
-            'completed': workout.completed,
-            'created_at': workout.created_at.isoformat() if workout.created_at else None
-        } for workout in workouts]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get('/api/workouts/{workout_id}/exercise-sets')
-async def api_workout_exercise_sets(request: Request, workout_id: int):
-    require_admin(request)
-
-    try:
-        exercise_sets = db.get_exercise_sets_by_workout(workout_id)
-        result = []
-        for ex_set in exercise_sets:
-            exercise = db.get_exercise_by_id(ex_set.exercise_id)
-            result.append({
-                'id': ex_set.id,
-                'exercise_id': ex_set.exercise_id,
-                'exercise_name': exercise.name if exercise else 'Unknown',
-                'exercise_description': exercise.description if exercise else '',
-                'exercise_parameters': exercise.get_parameters_dict() if exercise else {},
-                'set_order': ex_set.set_order,
-                'reps': ex_set.reps,
-                'weight_kg': ex_set.weight_kg,
-                'duration_s': ex_set.duration_s,
-                'distance_m': ex_set.distance_m,
-                'rest_seconds': ex_set.rest_seconds,
-                'completed': ex_set.completed
-            })
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get('/api/exercises')
-async def api_exercises(request: Request):
-    require_admin(request)
-
-    try:
-        exercises = db.get_all_exercises()
-        return [{
-            'id': exercise.id,
-            'name': exercise.name,
-            'description': exercise.description,
-            'has_reps': exercise.has_reps,
-            'has_weight_kg': exercise.has_weight_kg,
-            'has_duration_s': exercise.has_duration_s,
-            'has_distance_m': exercise.has_distance_m,
-            'parameter_types': exercise.parameter_types,
-            'parameter_summary': exercise.parameter_summary
-        } for exercise in exercises]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post('/api/workouts')
-async def api_create_workout(request: Request, workout_data: WorkoutCreate):
-    require_admin(request)
-
-    try:
-        workout = Workout(
-            user_id=workout_data.user_id,
-            name=workout_data.name,
-            description=workout_data.description,
-            duration_minutes=workout_data.duration_minutes,
-            workout_date=datetime.now(),
-            completed=False
-        )
-
-        created_workout = db.create_workout(workout)
-        return {
-            'id': created_workout.id,
-            'name': created_workout.name,
-            'description': created_workout.description,
-            'duration_minutes': created_workout.duration_minutes,
-            'workout_date': created_workout.workout_date.isoformat() if created_workout.workout_date else None,
-            'completed': created_workout.completed
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put('/api/workouts/{workout_id}')
-async def api_update_workout(request: Request, workout_id: int, update_data: WorkoutUpdate):
-    require_admin(request)
-
-    try:
-        workout = db.get_workout(workout_id)
-        if not workout:
-            raise HTTPException(status_code=404, detail='Workout not found')
-
-        if update_data.name is not None:
-            workout.name = update_data.name
-        if update_data.description is not None:
-            workout.description = update_data.description
-        if update_data.duration_minutes is not None:
-            workout.duration_minutes = update_data.duration_minutes
-
-        db.update_workout(workout)
-        return {
-            'id': workout.id,
-            'name': workout.name,
-            'description': workout.description,
-            'duration_minutes': workout.duration_minutes,
-            'completed': workout.completed
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Workout sets (groups of exercises within a workout)
-@app.get('/api/workouts/{workout_id}/sets')
-async def api_get_workout_sets(request: Request, workout_id: int):
-    require_admin(request)
-
-    try:
-        return db.get_workout_sets_with_exercises(workout_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post('/api/workouts/{workout_id}/sets')
-async def api_create_workout_set(request: Request, workout_id: int):
-    require_admin(request)
-
-    try:
-        workout_set = db.create_workout_set(workout_id)
-        return {
-            'id': workout_set.id,
-            'workout_id': workout_set.workout_id,
-            'set_order': workout_set.set_order,
-            'exercises': []
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post('/api/workouts/{workout_id}/assign')
-async def api_assign_workout(request: Request, workout_id: int, assign_data: WorkoutAssign):
-    require_admin(request)
-
-    try:
-        success = db.assign_workout_to_user(workout_id, assign_data.user_id)
-        if not success:
-            raise HTTPException(status_code=404, detail='Workout not found')
-        return {'message': 'Workout assigned', 'workout_id': workout_id, 'user_id': assign_data.user_id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put('/api/sets/{set_id}')
-async def api_update_workout_set(request: Request, set_id: int, update_data: WorkoutSetUpdate):
-    require_admin(request)
-
-    try:
-        workout_set = db.get_workout_set(set_id)
-        if not workout_set:
-            raise HTTPException(status_code=404, detail='Set not found')
-
-        if update_data.rest_seconds is not None:
-            workout_set.rest_seconds = update_data.rest_seconds
-        if update_data.comment is not None:
-            workout_set.comment = update_data.comment or None  # empty string clears the note
-
-        db.update_workout_set(workout_set)
-        return {
-            'id': workout_set.id,
-            'set_order': workout_set.set_order,
-            'rest_seconds': workout_set.rest_seconds,
-            'comment': workout_set.comment
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post('/api/sets/{set_id}/duplicate')
-async def api_duplicate_workout_set(request: Request, set_id: int):
-    require_admin(request)
-
-    try:
-        new_set = db.duplicate_workout_set(set_id)
-        if not new_set:
-            raise HTTPException(status_code=404, detail='Set not found')
-        return new_set
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete('/api/sets/{set_id}')
-async def api_delete_workout_set(request: Request, set_id: int):
-    require_admin(request)
-
-    try:
-        success = db.delete_workout_set(set_id)
-        if success:
-            return {'message': 'Set deleted successfully'}
-        else:
-            raise HTTPException(status_code=404, detail='Set not found')
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post('/api/sets/{set_id}/exercises')
-async def api_add_exercise_to_set(request: Request, set_id: int, set_data: ExerciseSetCreate):
-    require_admin(request)
-
-    try:
-        entry = db.add_exercise_to_set(set_id, set_data.exercise_id)
-        if not entry:
-            raise HTTPException(status_code=404, detail='Set not found')
-        return entry
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post('/api/exercise-sets/{set_id}/duplicate')
-async def api_duplicate_exercise_entry(request: Request, set_id: int):
-    require_admin(request)
-
-    try:
-        entry = db.duplicate_exercise_entry(set_id)
-        if not entry:
-            raise HTTPException(status_code=404, detail='Exercise entry not found')
-        return entry
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post('/api/workouts/{workout_id}/exercise-sets')
-async def api_add_exercise_set(request: Request, workout_id: int, set_data: ExerciseSetCreate):
-    require_admin(request)
-
-    try:
-        # Get the highest set_order for this workout
-        existing_sets = db.get_exercise_sets_by_workout(workout_id)
-        next_order = max([s.set_order for s in existing_sets], default=0) + 1
-
-        exercise_set = ExerciseSet(
-            workout_id=workout_id,
-            exercise_id=set_data.exercise_id,
-            set_order=next_order,
-            completed=False
-        )
-
-        created_set = db.create_exercise_set(exercise_set)
-        exercise = db.get_exercise_by_id(set_data.exercise_id)
-
-        return {
-            'id': created_set.id,
-            'exercise_id': created_set.exercise_id,
-            'exercise_name': exercise.name if exercise else 'Unknown',
-            'exercise_description': exercise.description if exercise else '',
-            'exercise_parameters': exercise.get_parameters_dict() if exercise else {},
-            'set_order': created_set.set_order,
-            'reps': created_set.reps,
-            'weight_kg': created_set.weight_kg,
-            'duration_s': created_set.duration_s,
-            'distance_m': created_set.distance_m,
-            'rest_seconds': created_set.rest_seconds,
-            'completed': created_set.completed
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put('/api/exercise-sets/{set_id}')
-async def api_update_exercise_set(request: Request, set_id: int, update_data: ExerciseSetUpdate):
-    require_admin(request)
-
-    try:
-        exercise_set = db.get_exercise_set_by_id(set_id)
-
-        if not exercise_set:
-            raise HTTPException(status_code=404, detail='Exercise set not found')
-
-        # Update fields if provided
-        if update_data.reps is not None:
-            exercise_set.reps = update_data.reps
-        if update_data.weight_kg is not None:
-            exercise_set.weight_kg = update_data.weight_kg
-        if update_data.duration_s is not None:
-            exercise_set.duration_s = update_data.duration_s
-        if update_data.distance_m is not None:
-            exercise_set.distance_m = update_data.distance_m
-        if update_data.rest_seconds is not None:
-            exercise_set.rest_seconds = update_data.rest_seconds
-        if update_data.completed is not None:
-            exercise_set.completed = update_data.completed
-        if update_data.comment is not None:
-            exercise_set.comment = update_data.comment or None  # empty string clears the note
-
-        updated_set = db.update_exercise_set(exercise_set)
-        exercise = db.get_exercise_by_id(updated_set.exercise_id)
-
-        return {
-            'id': updated_set.id,
-            'exercise_id': updated_set.exercise_id,
-            'exercise_name': exercise.name if exercise else 'Unknown',
-            'exercise_description': exercise.description if exercise else '',
-            'exercise_parameters': exercise.get_parameters_dict() if exercise else {},
-            'set_order': updated_set.set_order,
-            'reps': updated_set.reps,
-            'weight_kg': updated_set.weight_kg,
-            'duration_s': updated_set.duration_s,
-            'distance_m': updated_set.distance_m,
-            'rest_seconds': updated_set.rest_seconds,
-            'completed': updated_set.completed,
-            'comment': updated_set.comment
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete('/api/exercise-sets/{set_id}')
-async def api_delete_exercise_set(request: Request, set_id: int):
-    require_admin(request)
-
-    try:
-        success = db.delete_exercise_set(set_id)
-        if success:
-            return {'message': 'Exercise set deleted successfully'}
-        else:
-            raise HTTPException(status_code=404, detail='Exercise set not found')
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete('/api/workouts/{workout_id}')
-async def api_delete_workout(request: Request, workout_id: int):
-    require_admin(request)
-
-    try:
-        success = db.delete_workout(workout_id)
-        if success:
-            return {'message': 'Workout deleted successfully'}
-        else:
-            raise HTTPException(status_code=404, detail='Workout not found')
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get('/logout', response_class=RedirectResponse)
 async def logout(request: Request):
     request.session.clear()
     add_flash_message(request, 'You have been logged out.', 'info')
     return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+# ============ ADMIN PAGES ============
+@app.get('/admin/dashboard', response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        return templates.TemplateResponse(request, 'admin/dashboard.html', page_context(
+            request,
+            total_clients=db.count_clients(),
+            total_templates=db.count_templates(),
+            total_workouts=db.count_workouts(),
+            total_exercises=db.count_exercises(),
+            recent_clients=db.get_recent_clients(5),
+            recent_workouts=db.get_recent_workouts(5)
+        ))
+    except Exception as e:
+        add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
+        return templates.TemplateResponse(request, 'admin/dashboard.html', page_context(request))
+
+@app.get('/admin/users', response_class=HTMLResponse)
+async def admin_users(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        return templates.TemplateResponse(request, 'admin/users.html', page_context(
+            request, users=db.get_clients()))
+    except Exception as e:
+        add_flash_message(request, f'Error loading clients: {str(e)}', 'error')
+        return templates.TemplateResponse(request, 'admin/users.html', page_context(request))
+
+@app.get('/admin/templates', response_class=HTMLResponse)
+async def admin_templates(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        return templates.TemplateResponse(request, 'admin/templates.html', page_context(
+            request,
+            workout_templates=db.get_templates(),
+            clients=[c.to_public_dict() for c in db.get_clients()]
+        ))
+    except Exception as e:
+        add_flash_message(request, f'Error loading templates: {str(e)}', 'error')
+        return templates.TemplateResponse(request, 'admin/templates.html', page_context(request))
+
+@app.get('/admin/workout-composer', response_class=HTMLResponse)
+async def admin_workout_composer(request: Request, template_id: Optional[int] = None,
+                                 workout_id: Optional[int] = None):
+    """Composer: no params = new template; ?template_id= edits a template; ?workout_id= edits a client's workout"""
+    if not is_admin(request):
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        target = None
+        groups = []
+        if template_id:
+            template = db.get_template(template_id)
+            if not template:
+                add_flash_message(request, 'Template not found', 'error')
+                return RedirectResponse(url='/admin/templates', status_code=status.HTTP_302_FOUND)
+            target = dict(template.to_dict(), kind='templates')
+            groups = db.get_structure('templates', template_id)
+        elif workout_id:
+            workout = db.get_workout(workout_id)
+            if not workout:
+                add_flash_message(request, 'Workout not found', 'error')
+                return RedirectResponse(url='/admin/users', status_code=status.HTTP_302_FOUND)
+            if workout.completed:
+                add_flash_message(request, 'This workout is completed and can no longer be edited', 'info')
+                return RedirectResponse(url=f'/workouts/{workout_id}', status_code=status.HTTP_302_FOUND)
+            client = db.get_account(workout.client_id)
+            target = dict(workout.to_dict(), kind='workouts', client_name=client.full_name if client else '')
+            groups = db.get_structure('workouts', workout_id)
+
+        composer_data = {
+            'exercises': [exercise_dict(e) for e in db.get_exercises()],
+            'target': target,
+            'groups': groups
+        }
+        return templates.TemplateResponse(request, 'admin/workout_composer.html', page_context(
+            request, composer_data=jsonable_encoder(composer_data)))
+    except Exception as e:
+        add_flash_message(request, f'Error loading composer: {str(e)}', 'error')
+        return templates.TemplateResponse(request, 'admin/workout_composer.html', page_context(request))
+
+# ============ CLIENT PAGES ============
+@app.get('/user/dashboard', response_class=HTMLResponse)
+async def user_dashboard(request: Request):
+    if 'user' not in request.session or request.session.get('user_type') != 'user':
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        workouts = db.get_client_workouts(request.session.get('user_id'))
+        completed = len([w for w in workouts if w['completed']])
+        return templates.TemplateResponse(request, 'user/dashboard.html', page_context(
+            request,
+            workouts=workouts,
+            total_workouts=len(workouts),
+            completed_workouts=completed,
+            pending_workouts=len(workouts) - completed
+        ))
+    except Exception as e:
+        add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
+        return templates.TemplateResponse(request, 'user/dashboard.html', page_context(request))
+
+@app.get('/workouts/{workout_id}', response_class=HTMLResponse)
+async def workout_page(request: Request, workout_id: int):
+    """Workout view shared by the owning client (log results) and the coach (review); both can chat"""
+    if 'user' not in request.session:
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        workout = get_accessible_workout(request, workout_id)
+    except HTTPException:
+        add_flash_message(request, 'Workout not found', 'error')
+        return RedirectResponse(url='/dashboard', status_code=status.HTTP_302_FOUND)
+
+    client = db.get_account(workout.client_id)
+    viewer_is_admin = is_admin(request)
+    workout_data = {
+        'workout': dict(workout.to_dict(), completed=workout.completed,
+                        client_name=client.full_name if client else ''),
+        'groups': db.get_structure('workouts', workout_id),
+        'comments': db.get_workout_comments(workout_id),
+        'viewer': {'id': request.session.get('user_id'), 'is_admin': viewer_is_admin}
+    }
+    return templates.TemplateResponse(request, 'workout.html', page_context(
+        request,
+        base_template='admin/base.html' if viewer_is_admin else 'user/base.html',
+        workout=workout_data['workout'],
+        workout_data=jsonable_encoder(workout_data)
+    ))
+
+# ============ API: library & clients (admin) ============
+@app.get('/api/exercises')
+async def api_exercises(request: Request):
+    require_admin(request)
+    return [exercise_dict(e) for e in db.get_exercises()]
+
+@app.get('/api/clients')
+async def api_clients(request: Request):
+    require_admin(request)
+    return [c.to_public_dict() for c in db.get_clients()]
+
+@app.get('/api/clients/{client_id}/workouts')
+async def api_client_workouts(request: Request, client_id: int):
+    require_admin(request)
+    return db.get_client_workouts(client_id)
+
+# ============ API: templates (admin) ============
+@app.get('/api/templates')
+async def api_templates(request: Request):
+    require_admin(request)
+    return db.get_templates()
+
+@app.post('/api/templates')
+async def api_create_template(request: Request, body: TemplateCreate):
+    require_admin(request)
+    changes = changes_from(body)
+    template = db.create_template(WorkoutTemplate(created_by=request.session.get('user_id'), **changes))
+    return dict(template.to_dict(), groups=[])
+
+@app.get('/api/templates/{template_id}')
+async def api_get_template(request: Request, template_id: int):
+    require_admin(request)
+    template = db.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail='Template not found')
+    return dict(template.to_dict(), groups=db.get_structure('templates', template_id))
+
+@app.put('/api/templates/{template_id}')
+async def api_update_template(request: Request, template_id: int, body: TemplateUpdate):
+    """Partial update; setting status 'ready' validates the template first (400 listing the problems)"""
+    require_admin(request)
+    check_editable(Kind.templates, template_id)
+    changes = changes_from(body)
+    if changes.get('status') == 'ready':
+        problems = db.validate_structure('templates', template_id)
+        if problems:
+            raise HTTPException(status_code=400, detail='Template is not ready: ' + '; '.join(problems))
+    template = db.update_template(template_id, changes)
+    WorkoutTemplate(**template.to_dict())  # re-run model validation on the stored result
+    return template.to_dict()
+
+@app.delete('/api/templates/{template_id}')
+async def api_delete_template(request: Request, template_id: int):
+    require_admin(request)
+    if not db.delete_template(template_id):
+        raise HTTPException(status_code=404, detail='Template not found')
+    return {'message': 'Template deleted'}
+
+@app.post('/api/templates/{template_id}/assign')
+async def api_assign_template(request: Request, template_id: int, body: TemplateAssign):
+    """Copy a ready template into a new workout for a client"""
+    require_admin(request)
+    template = db.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail='Template not found')
+    if template.status != 'ready':
+        raise HTTPException(status_code=400, detail='Only ready templates can be assigned -- open it and press Save')
+    problems = db.validate_structure('templates', template_id)
+    if problems:
+        raise HTTPException(status_code=400, detail='Template is not ready: ' + '; '.join(problems))
+    client = db.get_account(body.client_id)
+    if not client or client.is_admin:
+        raise HTTPException(status_code=404, detail='Client not found')
+    workout_id = db.assign_template(template_id, body.client_id, request.session.get('user_id'), body.scheduled_date)
+    return {'workout_id': workout_id, 'client_id': body.client_id, 'template_id': template_id}
+
+# ============ API: client workouts ============
+@app.get('/api/workouts/{workout_id}')
+async def api_get_workout(request: Request, workout_id: int):
+    """Admin, or the client who owns it"""
+    workout = get_accessible_workout(request, workout_id)
+    return dict(workout.to_dict(), completed=workout.completed,
+                groups=db.get_structure('workouts', workout_id))
+
+@app.put('/api/workouts/{workout_id}')
+async def api_update_workout(request: Request, workout_id: int, body: WorkoutUpdate):
+    require_admin(request)
+    check_editable(Kind.workouts, workout_id)
+    workout = db.update_workout(workout_id, changes_from(body))
+    return dict(workout.to_dict(), completed=workout.completed)
+
+@app.delete('/api/workouts/{workout_id}')
+async def api_delete_workout(request: Request, workout_id: int):
+    require_admin(request)
+    if not db.delete_workout(workout_id):
+        raise HTTPException(status_code=404, detail='Workout not found')
+    return {'message': 'Workout deleted'}
+
+@app.put('/api/workout-sets/{set_id}/result')
+async def api_record_set_result(request: Request, set_id: int, body: SetResult):
+    """Client (or coach) logs actual values and ticks/unticks a set; the workout completes when all sets are done"""
+    owner_id = db.get_owner_id('workouts', set_id=set_id)
+    if owner_id is None:
+        raise HTTPException(status_code=404, detail='Set not found')
+    get_accessible_workout(request, owner_id)
+    changes = body.model_dump(exclude_unset=True)
+    completed = changes.pop('completed', None)
+    return db.record_set_result(set_id, changes, completed)
+
+@app.get('/api/workouts/{workout_id}/comments')
+async def api_workout_comments(request: Request, workout_id: int):
+    get_accessible_workout(request, workout_id)
+    return db.get_workout_comments(workout_id)
+
+@app.post('/api/workouts/{workout_id}/comments')
+async def api_add_comment(request: Request, workout_id: int, body: CommentCreate):
+    """Chat message on the workout, or on one of its groups/sets (which must belong to this workout)"""
+    get_accessible_workout(request, workout_id)
+    if body.set_id is not None:
+        target_owner = db.get_owner_id('workouts', set_id=body.set_id)
+    elif body.group_id is not None:
+        target_owner = db.get_owner_id('workouts', group_id=body.group_id)
+    else:
+        target_owner = workout_id
+    if target_owner != workout_id:
+        raise HTTPException(status_code=404, detail='Comment target not found in this workout')
+    attach = ({'set_id': body.set_id} if body.set_id is not None else
+              {'group_id': body.group_id} if body.group_id is not None else {'workout_id': workout_id})
+    return db.add_comment(Comment(author_id=request.session.get('user_id'), body=body.body, **attach))
+
+# ============ API: groups & sets (admin; same endpoints for templates and workouts) ============
+@app.post('/api/{kind}/{owner_id}/groups')
+async def api_create_group(request: Request, kind: Kind, owner_id: int):
+    require_admin(request)
+    check_editable(kind, owner_id)
+    return db.create_group(kind.value, owner_id)
+
+@app.put('/api/{kind}/{owner_id}/groups/order')
+async def api_reorder_groups(request: Request, kind: Kind, owner_id: int, body: OrderUpdate):
+    require_admin(request)
+    check_editable(kind, owner_id)
+    db.reorder_groups(kind.value, owner_id, body.ids)
+    return {'message': 'Groups reordered'}
+
+@app.put('/api/{kind}/groups/{group_id}')
+async def api_update_group(request: Request, kind: Kind, group_id: int, body: GroupUpdate):
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, group_id=group_id))
+    return db.update_group(kind.value, group_id, changes_from(body))
+
+@app.delete('/api/{kind}/groups/{group_id}')
+async def api_delete_group(request: Request, kind: Kind, group_id: int):
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, group_id=group_id))
+    db.delete_group(kind.value, group_id)
+    return {'message': 'Group deleted'}
+
+@app.post('/api/{kind}/groups/{group_id}/duplicate')
+async def api_duplicate_group(request: Request, kind: Kind, group_id: int):
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, group_id=group_id))
+    return db.duplicate_group(kind.value, group_id)
+
+@app.post('/api/{kind}/groups/{group_id}/sets')
+async def api_add_set(request: Request, kind: Kind, group_id: int, body: SetCreate):
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, group_id=group_id))
+    if not db.get_exercise(body.exercise_id):
+        raise HTTPException(status_code=404, detail='Exercise not found')
+    return db.add_set(kind.value, group_id, body.exercise_id)
+
+@app.put('/api/{kind}/groups/{group_id}/sets/order')
+async def api_reorder_sets(request: Request, kind: Kind, group_id: int, body: OrderUpdate):
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, group_id=group_id))
+    db.reorder_sets(kind.value, group_id, body.ids)
+    return {'message': 'Sets reordered'}
+
+@app.put('/api/{kind}/sets/{set_id}')
+async def api_update_set(request: Request, kind: Kind, set_id: int, body: SetUpdate):
+    """Partial update of targets, rest and note; an explicit null clears a value"""
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, set_id=set_id))
+    return db.update_set(kind.value, set_id, changes_from(body))
+
+@app.delete('/api/{kind}/sets/{set_id}')
+async def api_delete_set(request: Request, kind: Kind, set_id: int):
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, set_id=set_id))
+    db.delete_set(kind.value, set_id)
+    return {'message': 'Set deleted'}
+
+@app.post('/api/{kind}/sets/{set_id}/duplicate')
+async def api_duplicate_set(request: Request, kind: Kind, set_id: int):
+    require_admin(request)
+    check_editable(kind, db.get_owner_id(kind.value, set_id=set_id))
+    return db.duplicate_set(kind.value, set_id)
 
 if __name__ == '__main__':
     import uvicorn

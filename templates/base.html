@@ -18,8 +18,8 @@
             <ul class="nav-menu">
                 <li><a href="/dashboard" class="nav-link"><i class="fas fa-home"></i> Dashboard</a></li>
                 {% if request.session.get('user_type') == 'admin' %}
-                <li><a href="/admin/users" class="nav-link"><i class="fas fa-users"></i> Users</a></li>
-                <li><a href="/admin/workout-composer" class="nav-link"><i class="fas fa-plus-circle"></i> Create Workout</a></li>
+                <li><a href="/admin/users" class="nav-link"><i class="fas fa-users"></i> Clients</a></li>
+                <li><a href="/admin/templates" class="nav-link"><i class="fas fa-clipboard-list"></i> Templates</a></li>
                 {% endif %}
                 <li><a href="/logout" class="nav-link"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
             </ul>

@@ -1,0 +1,154 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Templates - FitCoach Admin{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <div class="page-header">
+        <h1><i class="fas fa-clipboard-list"></i> Workout Templates</h1>
+        <p>Build reusable workouts, then assign copies to clients</p>
+        <a href="/admin/workout-composer" class="btn btn-primary"><i class="fas fa-plus"></i> New Template</a>
+    </div>
+
+    {% if workout_templates %}
+    <div class="users-table-container">
+        <table class="users-table">
+            <thead>
+                <tr>
+                    <th>Template</th>
+                    <th>Status</th>
+                    <th>Groups / Sets</th>
+                    <th>Assigned</th>
+                    <th>Updated</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in workout_templates %}
+                <tr>
+                    <td>
+                        <strong>{{ t.name }}</strong>
+                        {% if t.description %}<br><small>{{ t.description[:60] }}</small>{% endif %}
+                    </td>
+                    <td>
+                        {% if t.status == 'ready' %}
+                        <span class="status-badge completed">Ready</span>
+                        {% else %}
+                        <span class="status-badge pending">Draft</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ t.group_count }} / {{ t.set_count }}</td>
+                    <td>{{ t.assigned_count }}×</td>
+                    <td>{{ t.updated_at.strftime('%Y-%m-%d') if t.updated_at else '-' }}</td>
+                    <td>
+                        <div class="action-buttons-inline">
+                            <a href="/admin/workout-composer?template_id={{ t.id }}" class="btn-sm">
+                                <i class="fas fa-edit"></i> Edit
+                            </a>
+                            {% if t.status == 'ready' %}
+                            <button type="button" class="btn-sm btn-primary no-loading"
+                                    data-id="{{ t.id }}" data-name="{{ t.name }}" onclick="openAssign(this)">
+                                <i class="fas fa-user-plus"></i> Assign
+                            </button>
+                            {% endif %}
+                            <button type="button" class="btn-sm no-loading"
+                                    data-id="{{ t.id }}" data-name="{{ t.name }}" onclick="deleteTemplate(this)">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state-large">
+        <i class="fas fa-clipboard-list fa-4x"></i>
+        <h2>No Templates Yet</h2>
+        <p><a href="/admin/workout-composer">Create your first template</a></p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Assign Modal -->
+<div id="assignModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="assignTitle">Assign Template</h2>
+            <span class="close">&times;</span>
+        </div>
+        <div class="modal-body">
+            {% if clients %}
+            <div class="form-group">
+                <label for="assignClient">Client</label>
+                <select id="assignClient">
+                    {% for c in clients %}
+                    <option value="{{ c.id }}">{{ c.full_name }} ({{ c.email }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="assignDate">Scheduled date (optional)</label>
+                <input type="date" id="assignDate">
+            </div>
+            <button type="button" id="assignSubmit" class="btn btn-primary no-loading">
+                <i class="fas fa-user-plus"></i> Assign
+            </button>
+            {% else %}
+            <p class="empty-state">No clients yet — they appear here after signing up.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const modal = document.getElementById('assignModal');
+let assignTemplateId = null;
+
+document.querySelector('#assignModal .close').onclick = () => { modal.style.display = 'none'; };
+window.onclick = (event) => { if (event.target == modal) modal.style.display = 'none'; };
+
+async function apiErrorText(response) {
+    try { return (await response.json()).detail || ('HTTP ' + response.status); }
+    catch (_) { return 'HTTP ' + response.status; }
+}
+
+function openAssign(btn) {
+    assignTemplateId = btn.dataset.id;
+    document.getElementById('assignTitle').textContent = 'Assign "' + btn.dataset.name + '"';
+    modal.style.display = 'block';
+}
+
+const submit = document.getElementById('assignSubmit');
+if (submit) {
+    submit.onclick = async () => {
+        const body = {
+            client_id: parseInt(document.getElementById('assignClient').value, 10),
+            scheduled_date: document.getElementById('assignDate').value || null
+        };
+        submit.disabled = true;
+        try {
+            const response = await fetch(`/api/templates/${assignTemplateId}/assign`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            });
+            if (!response.ok) throw new Error(await apiErrorText(response));
+            const result = await response.json();
+            window.location.href = '/workouts/' + result.workout_id;
+        } catch (error) {
+            FitCoachUtils.showNotification('Could not assign: ' + error.message, 'error');
+            submit.disabled = false;
+        }
+    };
+}
+
+async function deleteTemplate(btn) {
+    if (!confirm('Delete template "' + btn.dataset.name + '"? Workouts already assigned from it are kept.')) return;
+    const response = await fetch('/api/templates/' + btn.dataset.id, { method: 'DELETE' });
+    if (response.ok) location.reload();
+    else FitCoachUtils.showNotification('Could not delete: ' + await apiErrorText(response), 'error');
+}
+</script>
+{% endblock %}
