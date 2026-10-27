@@ -404,3 +404,13 @@ body.dragging * { user-select: none; -webkit-user-select: none; }
     .c-set > .icon-btn { width: 36px; height: 44px; }
     .c-set { gap: 6px; }
 }
+
+/* Phone nav with 5 sections: the logo goes (Home is right there) and Exercises moves into the avatar menu */
+@media (max-width: 800px) {
+    .side-nav .brand, .side-nav .nav-secondary { display: none; }
+}
+
+/* ---------- All workouts page ---------- */
+.filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.filter-bar select.input { width: auto; min-width: 180px; height: 40px; }
+.status-pills { display: flex; flex-wrap: wrap; gap: 6px; }

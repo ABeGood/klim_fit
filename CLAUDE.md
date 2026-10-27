@@ -32,7 +32,7 @@ python db_tests.py reset-seed              # drop everything, recreate schema, s
 | `db_tests.py` | Schema/seed tool (`seed_sample_data()`, `reset_database()`, `reset-seed` CLI). |
 | `migrations/` | Hand-written SQL migrations, applied **manually** (no runner, no tracking table). `archive/` holds the obsolete pre-v2 ones; v2 migrations start at `004_*.sql`. |
 | `DATA_MODEL.md` | The v2 data model: concepts, tables, rules. |
-| `templates/admin/` | Coach UI (side-nav shell `base.html`, active item via `nav`): `dashboard.html` (home: needs-attention cards + clients table), `users.html` (clients + workout history), `_clients_table.html` (shared include), `templates.html` (list + multi-client assign panel; `?client_id=` pre-ticks a client), `exercises.html` (library: add/archive/restore), `workout_composer.html`, `workout_review.html` (a client's workout: targets vs actuals + chat panel). |
+| `templates/admin/` | Coach UI (side-nav shell `base.html`, active item via `nav`): `dashboard.html` (home: needs-attention cards + clients table), `users.html` (clients + workout history), `workouts.html` (every assigned workout; client/status filters kept in the URL: `?client_id=&status=todo|overdue|completed`), `_clients_table.html` (shared include), `templates.html` (list + multi-client assign panel; `?client_id=` pre-ticks a client), `exercises.html` (library: add/archive/restore), `workout_composer.html`, `workout_review.html` (a client's workout: targets vs actuals + chat panel). |
 | `templates/user/` | Client UI (phone-width shell `base.html`, no nav): `dashboard.html` (In progress / Upcoming / Done), `workout.html` (the workout log). |
 | `templates/_macros.html` | Jinja macros: `day()` (Today/Yesterday/…), `progress()`, `percent()`, icons. Import per template (`{% import "_macros.html" as m %}`) — includes don't see the parent's imports. |
 | `templates/` (root) | `base.html` + the auth pages: `login.html`, `signup.html`, `change_password.html` — still on the old `style.css`/`main.js`. |
@@ -145,7 +145,7 @@ comments           id, author_id → accounts CASCADE, exactly one of workout_id
 
 Errors: API routes don't wrap themselves in try/except — app-level handlers map `ValueError` → 400 and `psycopg2.IntegrityError` → 409; raise `HTTPException` for 401/404/409. Responses are plain dicts (model `to_dict()` plus extras), encoded by FastAPI.
 
-Page routes: `/` `/login` `/signup` `/dashboard` (redirects by role) `/admin/dashboard` `/admin/users` `/admin/templates` `/admin/exercises` `/admin/workout-composer` (`?template_id=` / `?workout_id=` to edit; none = new template) `/workouts/{id}` (coach or owning client) `/user/dashboard` `/change_password` `/logout`, plus the OAuth pair.
+Page routes: `/` `/login` `/signup` `/dashboard` (redirects by role) `/admin/dashboard` `/admin/users` `/admin/workouts` `/admin/templates` `/admin/exercises` `/admin/workout-composer` (`?template_id=` / `?workout_id=` to edit; none = new template) `/workouts/{id}` (coach or owning client) `/user/dashboard` `/change_password` `/logout`, plus the OAuth pair.
 
 ## Frontend Conventions
 

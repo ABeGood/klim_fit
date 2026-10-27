@@ -553,6 +553,13 @@ class DatabaseManager:
             """, (client_id,))
         return [self._workout_list_row(row) for row in rows]
 
+    def get_all_workouts(self) -> List[Dict[str, Any]]:
+        """Every assigned workout with client name + progress: latest date first, undated last"""
+        rows = self._fetchall(self.WORKOUT_LIST_SQL + """
+            ORDER BY w.scheduled_date DESC NULLS LAST, w.created_at DESC;
+            """)
+        return [self._workout_list_row(row) for row in rows]
+
     def get_recent_workouts(self, limit: int = 5) -> List[Dict[str, Any]]:
         rows = self._fetchall(self.WORKOUT_LIST_SQL + " ORDER BY w.created_at DESC LIMIT %s;", (limit,))
         return [self._workout_list_row(row) for row in rows]

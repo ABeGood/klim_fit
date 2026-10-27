@@ -13,7 +13,7 @@
 {% include "admin/_clients_table.html" %}
 
 <section class="section">
-    <h2 class="section-label">Workout history</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px"><h2 class="section-label">Workout history</h2><a href="/admin/workouts" class="ui-btn ui-btn-ghost">All workouts in one list</a></div>
     {% for c in clients %}
     <details class="card" {% if loop.first %}open{% endif %}>
         <summary style="cursor: pointer; padding: 14px 18px; font-weight: 700; display: flex; justify-content: space-between; gap: 12px">

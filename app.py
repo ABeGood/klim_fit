@@ -432,6 +432,34 @@ async def admin_users(request: Request):
         add_flash_message(request, f'Error loading clients: {str(e)}', 'error')
         return templates.TemplateResponse(request, 'admin/users.html', page_context(request, nav='clients'))
 
+def workout_status(w: dict, today: date) -> str:
+    """'completed' | 'overdue' | 'today' (due today or already started) | 'upcoming' | 'unscheduled'"""
+    if w['completed']:
+        return 'completed'
+    d = w['scheduled_date']
+    if d and d < today:
+        return 'overdue'
+    if (d and d == today) or w['completed_set_count']:
+        return 'today'
+    return 'upcoming' if d else 'unscheduled'
+
+@app.get('/admin/workouts', response_class=HTMLResponse)
+async def admin_workouts(request: Request):
+    """Every assigned workout across clients, filterable by client and status"""
+    if not is_admin(request):
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        today = date.today()
+        workouts = db.get_all_workouts()
+        for w in workouts:
+            w['status'] = workout_status(w, today)
+        return templates.TemplateResponse(request, 'admin/workouts.html', page_context(
+            request, nav='workouts', today=today, workouts=workouts, clients=db.get_clients()))
+    except Exception as e:
+        add_flash_message(request, f'Error loading workouts: {str(e)}', 'error')
+        return templates.TemplateResponse(request, 'admin/workouts.html', page_context(request, nav='workouts'))
+
 @app.get('/admin/exercises', response_class=HTMLResponse)
 async def admin_exercises(request: Request):
     if not is_admin(request):

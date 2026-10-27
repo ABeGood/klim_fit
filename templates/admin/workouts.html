@@ -1,0 +1,132 @@
+{% extends "admin/base.html" %}
+{% import "_macros.html" as m %}
+
+{% block title %}Workouts - FitCoach{% endblock %}
+
+
+
+{% block content %}
+{% set STATUS = {
+    'today': ('In progress', 'badge-orange'),
+    'overdue': ('Overdue', 'badge-red'),
+    'upcoming': ('Upcoming', 'badge'),
+    'unscheduled': ('No date', 'badge'),
+    'completed': ('Completed', 'badge-blue')
+} %}
+<header style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px">
+    <div>
+        <h1 class="page-title">Workouts</h1>
+        <p class="muted">Every workout assigned to a client.</p>
+    </div>
+    <a href="/admin/templates" class="ui-btn ui-btn-primary">Assign a template</a>
+</header>
+
+{% if workouts is defined %}
+<div class="filter-bar">
+    <label for="clientFilter" class="sr-only">Client</label>
+    <select id="clientFilter" class="input">
+        <option value="">All clients</option>
+        {% for c in clients %}<option value="{{ c.id }}">{{ c.full_name }}</option>{% endfor %}
+    </select>
+    <div class="status-pills" role="group" aria-label="Status">
+        <button type="button" class="pill" data-status="" aria-pressed="true">All</button>
+        <button type="button" class="pill" data-status="todo" aria-pressed="false">To do</button>
+        <button type="button" class="pill" data-status="overdue" aria-pressed="false">Overdue</button>
+        <button type="button" class="pill" data-status="completed" aria-pressed="false">Completed</button>
+    </div>
+    <span class="muted" id="shownCount" style="font-size: 14px; margin-left: auto"></span>
+</div>
+
+<div class="card table-wrap">
+    <table class="table table-stack" style="min-width: 720px">
+        <thead>
+            <tr>
+                <th scope="col">Workout</th>
+                <th scope="col">Client</th>
+                <th scope="col">Date</th>
+                <th scope="col">Status</th>
+                <th scope="col">Progress</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for w in workouts %}
+            {% set st = STATUS[w.status] %}
+            <tr data-client="{{ w.client_id }}" data-status="{{ w.status }}">
+                <td data-label="Workout"><strong>{{ w.name }}</strong></td>
+                <td data-label="Client">{{ w.client_name }}</td>
+                <td data-label="Date" class="muted">{{ m.day(w.scheduled_date, today) or '—' }}</td>
+                <td data-label="Status"><span class="badge {{ st[1] }}">{{ st[0] }}</span></td>
+                <td data-label="Progress">
+                    <div class="mini-progress">{{ m.progress(w.completed_set_count, w.set_count, w.name ~ ' sets done') }}<span style="font-size: 13px; font-weight: 600">{{ w.completed_set_count }}/{{ w.set_count }}</span></div>
+                </td>
+                <td class="actions" style="text-align: right; white-space: nowrap">
+                    <a href="/workouts/{{ w.id }}" class="ui-btn ui-btn-ghost">Open</a>
+                    {% if not w.completed %}<a href="/admin/workout-composer?workout_id={{ w.id }}" class="ui-btn ui-btn-ghost">Edit</a>{% endif %}
+                    <button type="button" class="ui-btn ui-btn-ghost" style="color: var(--danger-ink)" data-id="{{ w.id }}" data-name="{{ w.name }}" data-client="{{ w.client_name }}" onclick="deleteWorkout(this)">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+            <tr id="noMatch" hidden><td colspan="6" class="empty">No workouts match these filters.</td></tr>
+            {% if not workouts %}
+            <tr><td colspan="6" class="empty">No workouts assigned yet. <a href="/admin/templates">Assign a template</a></td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const clientSel = document.getElementById('clientFilter');
+    if (!clientSel) return;
+    const pills = Array.from(document.querySelectorAll('.status-pills .pill'));
+    const rows = Array.from(document.querySelectorAll('tbody tr[data-status]'));
+    // "To do" groups everything not finished and not overdue
+    const TODO = ['today', 'upcoming', 'unscheduled'];
+    let status = '';
+
+    function apply() {
+        let shown = 0;
+        rows.forEach((tr) => {
+            const s = tr.dataset.status;
+            const okStatus = !status || (status === 'todo' ? TODO.includes(s) : s === status);
+            const ok = okStatus && (!clientSel.value || tr.dataset.client === clientSel.value);
+            tr.hidden = !ok;
+            if (ok) shown++;
+        });
+        document.getElementById('noMatch').hidden = shown > 0 || !rows.length;
+        document.getElementById('shownCount').textContent = shown + ' of ' + rows.length + ' workouts';
+        // keep filters in the URL so Back / sharing keeps them
+        const q = new URLSearchParams();
+        if (clientSel.value) q.set('client_id', clientSel.value);
+        if (status) q.set('status', status);
+        history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : ''));
+    }
+
+    pills.forEach((p) => p.addEventListener('click', () => {
+        status = p.dataset.status;
+        pills.forEach((x) => x.setAttribute('aria-pressed', x === p ? 'true' : 'false'));
+        apply();
+    }));
+    clientSel.addEventListener('change', apply);
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('client_id')) clientSel.value = params.get('client_id');
+    const pre = pills.find((p) => p.dataset.status === (params.get('status') || ''));
+    if (pre) pre.click(); else apply();
+
+    window.deleteWorkout = async function (btn) {
+        if (!confirm('Delete "' + btn.dataset.name + '" for ' + btn.dataset.client + '? Their logged results and chat for it are deleted too. This can\'t be undone.')) return;
+        try {
+            await FitCoach.api('/api/workouts/' + btn.dataset.id, 'DELETE');
+            location.reload();
+        } catch (err) {
+            FitCoach.notify('Could not delete: ' + err.message, 'error');
+        }
+    };
+})();
+</script>
+{% endblock %}
