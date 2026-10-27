@@ -3,58 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Admin - FitCoach{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <title>{% block title %}Coach - FitCoach{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-    <nav class="navbar admin-nav">
-        <div class="nav-container">
-            <div class="nav-brand">
-                <i class="fas fa-crown" style="color: gold;"></i>
-                <span>FitCoach Admin</span>
+    <div class="coach-shell">
+        <nav class="side-nav" aria-label="Coach">
+            <a href="/admin/dashboard" class="brand"><span class="brand-mark">F</span> FitCoach</a>
+            <a href="/admin/dashboard" class="nav-item" {% if nav == 'home' %}aria-current="page"{% endif %}>Home</a>
+            <a href="/admin/users" class="nav-item" {% if nav == 'clients' %}aria-current="page"{% endif %}>Clients</a>
+            <a href="/admin/templates" class="nav-item" {% if nav == 'templates' %}aria-current="page"{% endif %}>Templates</a>
+            <a href="/admin/exercises" class="nav-item" {% if nav == 'exercises' %}aria-current="page"{% endif %}>Exercises</a>
+            <div class="nav-foot">
+                <div class="nav-who">
+                    {% if profile_picture %}
+                    <img src="{{ profile_picture }}" alt="" class="avatar">
+                    {% else %}
+                    <span class="avatar" aria-hidden="true">{{ (name or 'C')[:1] }}</span>
+                    {% endif %}
+                    <span>{{ name }}</span>
+                </div>
+                <a href="/change_password" class="nav-item">Change password</a>
+                <a href="/logout" class="nav-item">Log out</a>
             </div>
-            <ul class="nav-menu">
-                <li><a href="/admin/dashboard" class="nav-link"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
-                <li><a href="/admin/users" class="nav-link"><i class="fas fa-users"></i> Clients</a></li>
-                <li><a href="/admin/templates" class="nav-link"><i class="fas fa-clipboard-list"></i> Templates</a></li>
-                <li><a href="/admin/workout-composer" class="nav-link"><i class="fas fa-plus-circle"></i> New Template</a></li>
-                <li class="nav-user">
-                    <div class="user-profile">
-                        {% if profile_picture %}
-                        <img src="{{ profile_picture }}" alt="{{ name }}" class="profile-img">
-                        {% else %}
-                        <div class="profile-placeholder">{{ name[0] if name else 'A' }}</div>
-                        {% endif %}
-                        <span>{{ name }}</span>
-                    </div>
-                </li>
-                <li><a href="/logout" class="nav-link"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
-            </ul>
-            <div class="hamburger">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
+        </nav>
+
+        <main class="coach-main {% block main_class %}{% endblock %}">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <div class="flash-messages" role="status">
+        {% for msg in messages or [] %}
+        <div class="alert alert-{{ msg.category }}">
+            <span>{{ msg.message }}</span>
+            <button type="button" class="close-btn" aria-label="Dismiss">&times;</button>
         </div>
-    </nav>
+        {% endfor %}
+    </div>
 
-    <main class="main-content">
-        {% if messages %}
-            <div class="flash-messages">
-                {% for msg in messages %}
-                    <div class="alert alert-{{ msg.category }}">
-                        {{ msg.message }}
-                        <span class="close-btn">&times;</span>
-                    </div>
-                {% endfor %}
-            </div>
-        {% endif %}
-
-        {% block content %}{% endblock %}
-    </main>
-
-    <script src="/static/js/main.js"></script>
+    <script src="/static/js/ui.js"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

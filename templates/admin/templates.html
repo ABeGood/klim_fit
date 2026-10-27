@@ -1,154 +1,146 @@
 {% extends "admin/base.html" %}
 
-{% block title %}Templates - FitCoach Admin{% endblock %}
+{% block title %}Templates - FitCoach{% endblock %}
 
 {% block content %}
-<div class="users-page">
-    <div class="page-header">
-        <h1><i class="fas fa-clipboard-list"></i> Workout Templates</h1>
-        <p>Build reusable workouts, then assign copies to clients</p>
-        <a href="/admin/workout-composer" class="btn btn-primary"><i class="fas fa-plus"></i> New Template</a>
-    </div>
-
-    {% if workout_templates %}
-    <div class="users-table-container">
-        <table class="users-table">
-            <thead>
-                <tr>
-                    <th>Template</th>
-                    <th>Status</th>
-                    <th>Groups / Sets</th>
-                    <th>Assigned</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for t in workout_templates %}
-                <tr>
-                    <td>
-                        <strong>{{ t.name }}</strong>
-                        {% if t.description %}<br><small>{{ t.description[:60] }}</small>{% endif %}
-                    </td>
-                    <td>
-                        {% if t.status == 'ready' %}
-                        <span class="status-badge completed">Ready</span>
-                        {% else %}
-                        <span class="status-badge pending">Draft</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ t.group_count }} / {{ t.set_count }}</td>
-                    <td>{{ t.assigned_count }}×</td>
-                    <td>{{ t.updated_at.strftime('%Y-%m-%d') if t.updated_at else '-' }}</td>
-                    <td>
-                        <div class="action-buttons-inline">
-                            <a href="/admin/workout-composer?template_id={{ t.id }}" class="btn-sm">
-                                <i class="fas fa-edit"></i> Edit
-                            </a>
-                            {% if t.status == 'ready' %}
-                            <button type="button" class="btn-sm btn-primary no-loading"
-                                    data-id="{{ t.id }}" data-name="{{ t.name }}" onclick="openAssign(this)">
-                                <i class="fas fa-user-plus"></i> Assign
-                            </button>
-                            {% endif %}
-                            <button type="button" class="btn-sm no-loading"
-                                    data-id="{{ t.id }}" data-name="{{ t.name }}" onclick="deleteTemplate(this)">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state-large">
-        <i class="fas fa-clipboard-list fa-4x"></i>
-        <h2>No Templates Yet</h2>
-        <p><a href="/admin/workout-composer">Create your first template</a></p>
-    </div>
-    {% endif %}
-</div>
-
-<!-- Assign Modal -->
-<div id="assignModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 id="assignTitle">Assign Template</h2>
-            <span class="close">&times;</span>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px">
+    <section style="flex: 999 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px">
+            <h1 class="page-title">Templates</h1>
+            <a href="/admin/workout-composer" class="ui-btn ui-btn-primary">+ New template</a>
         </div>
-        <div class="modal-body">
-            {% if clients %}
-            <div class="form-group">
-                <label for="assignClient">Client</label>
-                <select id="assignClient">
-                    {% for c in clients %}
-                    <option value="{{ c.id }}">{{ c.full_name }} ({{ c.email }})</option>
-                    {% endfor %}
-                </select>
+
+        {% for t in workout_templates or [] %}
+        {% set problems = template_problems.get(t.id, []) if template_problems else [] %}
+        <div class="card tpl-card" data-template="{{ t.id }}">
+            <div class="grow">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                    <span class="tpl-name">{{ t.name }}</span>
+                    {% if t.status == 'ready' %}
+                    <span class="badge badge-blue">Ready</span>
+                    {% elif problems %}
+                    <span class="badge badge-red" title="{{ problems | join('; ') }}">Draft · {{ problems | length }} problem{{ 's' if problems | length != 1 }}</span>
+                    {% else %}
+                    <span class="badge">Draft</span>
+                    {% endif %}
+                </div>
+                <span class="muted" style="font-size: 14px">
+                    {{ t.group_count }} group{{ 's' if t.group_count != 1 }} · {{ t.set_count }} sets{% if t.duration_minutes %} · {{ t.duration_minutes }} min{% endif %} ·
+                    {% if t.status == 'ready' %}assigned {{ t.assigned_count }}×{% else %}open it and press Save to make it assignable{% endif %}
+                </span>
             </div>
-            <div class="form-group">
-                <label for="assignDate">Scheduled date (optional)</label>
-                <input type="date" id="assignDate">
+            <div style="display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end">
+                <a href="/admin/workout-composer?template_id={{ t.id }}" class="ui-btn ui-btn-ghost">{{ 'Edit' if t.status == 'ready' else 'Finish' }}</a>
+                {% if t.status == 'ready' %}
+                <button type="button" class="ui-btn ui-btn-outline ui-btn-sm" data-id="{{ t.id }}" data-name="{{ t.name }}" onclick="pickTemplate(this)">Assign</button>
+                {% endif %}
+                <button type="button" class="icon-btn soft" aria-label="Delete {{ t.name }}" data-id="{{ t.id }}" data-name="{{ t.name }}" onclick="deleteTemplate(this)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4h6v2"></path></svg>
+                </button>
             </div>
-            <button type="button" id="assignSubmit" class="btn btn-primary no-loading">
-                <i class="fas fa-user-plus"></i> Assign
-            </button>
+        </div>
+        {% else %}
+        <div class="card empty" style="padding: 40px">
+            <div style="font-size: 18px; font-weight: 800; color: var(--ink)">No templates yet</div>
+            <p style="margin-top: 6px"><a href="/admin/workout-composer">Build your first workout template</a></p>
+        </div>
+        {% endfor %}
+    </section>
+
+    <aside class="card assign-panel" id="assignPanel" hidden style="flex: 1 1 340px; max-width: 100%" aria-labelledby="assignTitle">
+        <div>
+            <h2 id="assignTitle" style="font-size: 20px; font-weight: 800">Assign</h2>
+            <p class="muted" style="font-size: 14px; margin-top: 4px">Each client gets their own copy. Editing the template later won’t change copies already assigned.</p>
+        </div>
+        <fieldset style="border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+            <legend class="field-label" style="margin-bottom: 8px">Clients</legend>
+            {% for c in clients or [] %}
+            {% set w = c.current_workout %}
+            <label class="client-pick">
+                <input type="checkbox" name="client" value="{{ c.id }}">
+                <span style="flex: 1; display: flex; flex-direction: column">
+                    <span style="font-weight: 700">{{ c.full_name }}</span>
+                    <span class="muted" style="font-size: 13px">{% if w %}Working on {{ w.name }} ({{ w.completed_set_count }}/{{ w.set_count }}){% else %}Nothing to do right now{% endif %}</span>
+                </span>
+            </label>
             {% else %}
-            <p class="empty-state">No clients yet — they appear here after signing up.</p>
-            {% endif %}
+            <p class="muted">No clients yet — they appear here after signing up.</p>
+            {% endfor %}
+        </fieldset>
+        <div class="field">
+            <label for="assignDate">Date (optional)</label>
+            <input id="assignDate" type="date" class="input">
         </div>
-    </div>
+        <button type="button" id="assignBtn" class="ui-btn ui-btn-primary ui-btn-block" disabled>Pick at least one client</button>
+        <button type="button" class="ui-btn ui-btn-ghost" onclick="closeAssign()">Cancel</button>
+    </aside>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-const modal = document.getElementById('assignModal');
-let assignTemplateId = null;
+(function () {
+    const panel = document.getElementById('assignPanel');
+    const btn = document.getElementById('assignBtn');
+    const boxes = Array.from(document.querySelectorAll('input[name=client]'));
+    let templateId = null;
 
-document.querySelector('#assignModal .close').onclick = () => { modal.style.display = 'none'; };
-window.onclick = (event) => { if (event.target == modal) modal.style.display = 'none'; };
+    function refresh() {
+        const n = boxes.filter((b) => b.checked).length;
+        btn.disabled = !n || !templateId;
+        btn.textContent = n ? 'Assign to ' + n + (n === 1 ? ' client' : ' clients') : 'Pick at least one client';
+    }
+    boxes.forEach((b) => b.addEventListener('change', refresh));
 
-async function apiErrorText(response) {
-    try { return (await response.json()).detail || ('HTTP ' + response.status); }
-    catch (_) { return 'HTTP ' + response.status; }
-}
+    window.pickTemplate = function (el) {
+        templateId = el.dataset.id;
+        document.querySelectorAll('.tpl-card').forEach((c) => c.classList.toggle('selected', c.dataset.template === templateId));
+        document.getElementById('assignTitle').textContent = 'Assign “' + el.dataset.name + '”';
+        panel.hidden = false;
+        refresh();
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
 
-function openAssign(btn) {
-    assignTemplateId = btn.dataset.id;
-    document.getElementById('assignTitle').textContent = 'Assign "' + btn.dataset.name + '"';
-    modal.style.display = 'block';
-}
+    window.closeAssign = function () {
+        panel.hidden = true;
+        templateId = null;
+        document.querySelectorAll('.tpl-card').forEach((c) => c.classList.remove('selected'));
+    };
 
-const submit = document.getElementById('assignSubmit');
-if (submit) {
-    submit.onclick = async () => {
-        const body = {
-            client_id: parseInt(document.getElementById('assignClient').value, 10),
-            scheduled_date: document.getElementById('assignDate').value || null
-        };
-        submit.disabled = true;
+    btn.addEventListener('click', async () => {
+        const ids = boxes.filter((b) => b.checked).map((b) => parseInt(b.value, 10));
+        btn.disabled = true;
         try {
-            const response = await fetch(`/api/templates/${assignTemplateId}/assign`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            const res = await FitCoach.api('/api/templates/' + templateId + '/assign', 'POST', {
+                client_ids: ids, scheduled_date: document.getElementById('assignDate').value || null
             });
-            if (!response.ok) throw new Error(await apiErrorText(response));
-            const result = await response.json();
-            window.location.href = '/workouts/' + result.workout_id;
-        } catch (error) {
-            FitCoachUtils.showNotification('Could not assign: ' + error.message, 'error');
-            submit.disabled = false;
+            // One client: go straight to their copy; several: back to clients
+            window.location.href = res.workout_ids.length === 1 ? '/workouts/' + res.workout_ids[0] : '/admin/users';
+        } catch (err) {
+            FitCoach.notify('Could not assign: ' + err.message, 'error');
+            refresh();
+        }
+    });
+
+    window.deleteTemplate = async function (el) {
+        if (!confirm('Delete template "' + el.dataset.name + '"? Workouts already assigned from it are kept.')) return;
+        try {
+            await FitCoach.api('/api/templates/' + el.dataset.id, 'DELETE');
+            location.reload();
+        } catch (err) {
+            FitCoach.notify('Could not delete: ' + err.message, 'error');
         }
     };
-}
 
-async function deleteTemplate(btn) {
-    if (!confirm('Delete template "' + btn.dataset.name + '"? Workouts already assigned from it are kept.')) return;
-    const response = await fetch('/api/templates/' + btn.dataset.id, { method: 'DELETE' });
-    if (response.ok) location.reload();
-    else FitCoachUtils.showNotification('Could not delete: ' + await apiErrorText(response), 'error');
-}
+    // ?client_id=N (from "Assign" on a client): pre-tick that client; one ready template -> open the panel
+    const pre = new URLSearchParams(location.search).get('client_id');
+    if (pre) {
+        boxes.forEach((b) => { if (b.value === pre) b.checked = true; });
+        const ready = document.querySelectorAll('button[onclick="pickTemplate(this)"]');
+        if (ready.length === 1) window.pickTemplate(ready[0]);
+        else FitCoach.notify('Pick a template to assign — the client is already ticked.', 'info');
+    }
+    refresh();
+})();
 </script>
 {% endblock %}

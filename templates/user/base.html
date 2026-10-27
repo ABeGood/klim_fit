@@ -2,57 +2,27 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}FitCoach{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-    <nav class="navbar user-nav">
-        <div class="nav-container">
-            <div class="nav-brand">
-                <i class="fas fa-dumbbell"></i>
-                <span>FitCoach</span>
-            </div>
-            <ul class="nav-menu">
-                <li><a href="/user/dashboard" class="nav-link"><i class="fas fa-home"></i> My Workouts</a></li>
-                <li class="nav-user">
-                    <div class="user-profile">
-                        {% if profile_picture %}
-                        <img src="{{ profile_picture }}" alt="{{ name }}" class="profile-img">
-                        {% else %}
-                        <div class="profile-placeholder">{{ name[0] if name else 'U' }}</div>
-                        {% endif %}
-                        <span>{{ name }}</span>
-                    </div>
-                </li>
-                <li><a href="/change_password" class="nav-link"><i class="fas fa-key"></i> Change Password</a></li>
-                <li><a href="/logout" class="nav-link"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
-            </ul>
-            <div class="hamburger">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
-        </div>
-    </nav>
-
-    <main class="main-content">
-        {% if messages %}
-            <div class="flash-messages">
-                {% for msg in messages %}
-                    <div class="alert alert-{{ msg.category }}">
-                        {{ msg.message }}
-                        <span class="close-btn">&times;</span>
-                    </div>
-                {% endfor %}
-            </div>
-        {% endif %}
-
+    <div class="client-shell">
         {% block content %}{% endblock %}
-    </main>
+    </div>
 
-    <script src="/static/js/main.js"></script>
+    <div class="flash-messages" role="status">
+        {% for msg in messages or [] %}
+        <div class="alert alert-{{ msg.category }}">
+            <span>{{ msg.message }}</span>
+            <button type="button" class="close-btn" aria-label="Dismiss">&times;</button>
+        </div>
+        {% endfor %}
+    </div>
+
+    <script src="/static/js/ui.js"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

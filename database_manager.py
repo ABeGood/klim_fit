@@ -340,6 +340,70 @@ class DatabaseManager:
     def count_clients(self) -> int:
         return self._count("SELECT COUNT(*) FROM accounts WHERE role = 'client';")
 
+    def get_clients_overview(self) -> List[Dict[str, Any]]:
+        """Every client with their current workout (the earliest-scheduled unfinished one), progress and
+        last activity (latest completed set or message they wrote) -- the coach's clients table"""
+        clients = self.get_clients()
+        workouts = [self._workout_list_row(row) for row in self._fetchall(self.WORKOUT_LIST_SQL + """
+            WHERE w.completed_at IS NULL
+            ORDER BY w.scheduled_date ASC NULLS LAST, w.created_at ASC;
+            """)]
+        activity = {row['id']: row for row in self._fetchall("""
+            SELECT a.id,
+                   (SELECT MAX(s.completed_at) FROM workout_sets s
+                      JOIN workout_groups g ON g.id = s.group_id JOIN workouts w ON w.id = g.workout_id
+                     WHERE w.client_id = a.id) AS last_set_at,
+                   (SELECT MAX(c.created_at) FROM comments c WHERE c.author_id = a.id) AS last_message_at
+            FROM accounts a WHERE a.role = 'client';
+            """)}
+        result = []
+        for client in clients:
+            current = next((w for w in workouts if w['client_id'] == client.id), None)
+            act = activity.get(client.id, {})
+            result.append(dict(client.to_public_dict(), current_workout=current,
+                               last_set_at=act.get('last_set_at'), last_message_at=act.get('last_message_at')))
+        return result
+
+    def get_attention_items(self) -> Dict[str, List[Dict[str, Any]]]:
+        """What the coach should look at: chat threads whose latest message is from the client (unanswered),
+        unfinished workouts scheduled before today, and clients with no unfinished workout"""
+        unanswered = self._fetchall("""
+            WITH c2 AS (
+                SELECT c.*, COALESCE(c.workout_id, g.workout_id, sg.workout_id) AS wid
+                FROM comments c
+                LEFT JOIN workout_groups g ON g.id = c.group_id
+                LEFT JOIN workout_sets s ON s.id = c.set_id
+                LEFT JOIN workout_groups sg ON sg.id = s.group_id
+            ), latest AS (
+                SELECT DISTINCT ON (wid, workout_id, group_id, set_id) *
+                FROM c2 ORDER BY wid, workout_id, group_id, set_id, created_at DESC, id DESC
+            )
+            SELECT l.id, l.wid AS workout_id, l.group_id, l.set_id, l.body, l.created_at,
+                   a.name || ' ' || a.surname AS client_name, w.name AS workout_name,
+                   COALESCE(g.name, 'Group ' || g.position) AS group_label,
+                   e.name AS exercise_name, s.position AS set_position
+            FROM latest l
+            JOIN accounts a ON a.id = l.author_id AND a.role = 'client'
+            JOIN workouts w ON w.id = l.wid
+            LEFT JOIN workout_groups g ON g.id = l.group_id
+            LEFT JOIN workout_sets s ON s.id = l.set_id
+            LEFT JOIN exercises e ON e.id = s.exercise_id
+            ORDER BY l.created_at DESC;
+            """)
+        for item in unanswered:
+            item['context'] = (f"{item['exercise_name']} · set {item['set_position']}" if item['set_id']
+                               else item['group_label'] if item['group_id'] else 'the workout')
+        overdue = [self._workout_list_row(row) for row in self._fetchall(self.WORKOUT_LIST_SQL + """
+            WHERE w.completed_at IS NULL AND w.scheduled_date < CURRENT_DATE
+            ORDER BY w.scheduled_date;
+            """)]
+        no_plan = [Account.from_dict(row).to_public_dict() for row in self._fetchall("""
+            SELECT * FROM accounts a WHERE a.role = 'client'
+              AND NOT EXISTS (SELECT 1 FROM workouts w WHERE w.client_id = a.id AND w.completed_at IS NULL)
+            ORDER BY a.surname, a.name;
+            """)]
+        return {'unanswered': unanswered, 'overdue': overdue, 'no_plan': no_plan}
+
     def update_account_google_info(self, account_id: int, google_id: str, profile_picture: str = None) -> bool:
         return self._execute("UPDATE accounts SET google_id = %s, profile_picture = %s WHERE id = %s;",
                              (google_id, profile_picture, account_id)) > 0
@@ -376,6 +440,20 @@ class DatabaseManager:
         where = "" if include_archived else "WHERE archived_at IS NULL"
         rows = self._fetchall(f"SELECT * FROM exercises {where} ORDER BY name;")
         return [Exercise.from_dict(row) for row in rows]
+
+    def get_exercises_with_usage(self) -> List[Dict[str, Any]]:
+        """All exercises incl. archived, with how many template/workout sets use each (library page)"""
+        rows = self._fetchall("""
+            SELECT e.*,
+                   (SELECT COUNT(*) FROM template_sets t WHERE t.exercise_id = e.id)
+                 + (SELECT COUNT(*) FROM workout_sets w WHERE w.exercise_id = e.id) AS usage_count
+            FROM exercises e ORDER BY e.archived_at IS NOT NULL, e.name;
+            """)
+        return [dict(Exercise.from_dict(row).to_dict(), usage_count=row['usage_count']) for row in rows]
+
+    def restore_exercise(self, exercise_id: int) -> bool:
+        """Bring an archived exercise back into the library"""
+        return self._execute("UPDATE exercises SET archived_at = NULL WHERE id = %s;", (exercise_id,)) > 0
 
     def count_exercises(self) -> int:
         return self._count("SELECT COUNT(*) FROM exercises WHERE archived_at IS NULL;")
@@ -441,7 +519,15 @@ class DatabaseManager:
                (SELECT COUNT(*) FROM workout_sets s JOIN workout_groups g ON g.id = s.group_id
                  WHERE g.workout_id = w.id) AS set_count,
                (SELECT COUNT(*) FROM workout_sets s JOIN workout_groups g ON g.id = s.group_id
-                 WHERE g.workout_id = w.id AND s.completed_at IS NOT NULL) AS completed_set_count
+                 WHERE g.workout_id = w.id AND s.completed_at IS NOT NULL) AS completed_set_count,
+               (SELECT COUNT(*) FROM workout_groups g WHERE g.workout_id = w.id) AS group_count,
+               (SELECT c.body FROM comments c
+                  JOIN accounts ca ON ca.id = c.author_id AND ca.role = 'admin'
+                  LEFT JOIN workout_groups cg ON cg.id = c.group_id
+                  LEFT JOIN workout_sets cs ON cs.id = c.set_id
+                  LEFT JOIN workout_groups csg ON csg.id = cs.group_id
+                 WHERE COALESCE(c.workout_id, cg.workout_id, csg.workout_id) = w.id
+                 ORDER BY c.created_at DESC LIMIT 1) AS last_coach_message
         FROM workouts w JOIN accounts a ON a.id = w.client_id
         """
 
@@ -449,7 +535,8 @@ class DatabaseManager:
     def _workout_list_row(row: Dict[str, Any]) -> Dict[str, Any]:
         workout = Workout.from_dict(row)
         return dict(workout.to_dict(), completed=workout.completed, client_name=row['client_name'],
-                    set_count=row['set_count'], completed_set_count=row['completed_set_count'])
+                    set_count=row['set_count'], completed_set_count=row['completed_set_count'],
+                    group_count=row['group_count'], last_coach_message=row['last_coach_message'])
 
     def get_client_workouts(self, client_id: int) -> List[Dict[str, Any]]:
         """A client's workouts with progress counts: undated first, then by date (newest first)"""

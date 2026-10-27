@@ -1,127 +1,62 @@
 {% extends "admin/base.html" %}
+{% import "_macros.html" as m %}
 
-{% block title %}Admin Dashboard - FitCoach{% endblock %}
+{% block title %}Home - FitCoach{% endblock %}
 
 {% block content %}
-<div class="dashboard">
-    <div class="dashboard-header">
-        <h1>Admin Dashboard</h1>
-        <p>Manage clients, templates, and workouts</p>
+<header>
+    <div class="muted" style="font-size: 14px; font-weight: 500">{{ today.strftime('%A, %B %-d') if today }}</div>
+    <h1 class="page-title">Hello, {{ (name or '').split(' ')[0] }}</h1>
+</header>
+
+{% if attention %}
+{% set n = attention.unanswered | length + attention.overdue | length + attention.no_plan | length %}
+<section class="section">
+    <h2 class="section-label">Needs your attention · {{ n }}</h2>
+    {% if n %}
+    <div class="attention-grid">
+        {% for item in attention.unanswered %}
+        <div class="card card-pad attention-card">
+            <div style="display: flex; align-items: center; gap: 8px">
+                <span class="badge badge-blue">New message</span>
+                <span class="muted" style="font-size: 13px">{{ m.day(item.created_at.date(), today) }} {{ item.created_at.strftime('%H:%M') }}</span>
+            </div>
+            <span><strong>{{ item.client_name }}</strong> on {{ item.context }}</span>
+            <span class="quote">“{{ item.body }}”</span>
+            <a href="/workouts/{{ item.workout_id }}" class="ui-btn ui-btn-primary ui-btn-sm" style="align-self: flex-start">Reply</a>
+        </div>
+        {% endfor %}
+        {% for w in attention.overdue %}
+        <div class="card card-pad attention-card">
+            <div style="display: flex; align-items: center; gap: 8px">
+                <span class="badge badge-orange">Behind</span>
+                <span class="muted" style="font-size: 13px">Scheduled {{ m.day(w.scheduled_date, today) }}</span>
+            </div>
+            <span><strong>{{ w.client_name }}</strong> · {{ w.name }}</span>
+            <span class="quote">{{ w.completed_set_count }} of {{ w.set_count }} sets done</span>
+            <a href="/workouts/{{ w.id }}" class="ui-btn ui-btn-outline ui-btn-sm" style="align-self: flex-start">Open workout</a>
+        </div>
+        {% endfor %}
+        {% for c in attention.no_plan %}
+        <div class="card card-pad attention-card">
+            <div><span class="badge">No plan</span></div>
+            <span><strong>{{ c.full_name }}</strong></span>
+            <span class="quote">No workout to do right now</span>
+            <a href="/admin/templates?client_id={{ c.id }}" class="ui-btn ui-btn-outline ui-btn-sm" style="align-self: flex-start">Assign a template</a>
+        </div>
+        {% endfor %}
     </div>
+    {% else %}
+    <div class="card empty">All caught up — no unanswered messages or overdue workouts.</div>
+    {% endif %}
+</section>
+{% endif %}
 
-    <!-- Statistics Cards -->
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-icon">
-                <i class="fas fa-users"></i>
-            </div>
-            <div class="stat-info">
-                <h3>{{ total_clients }}</h3>
-                <p>Clients</p>
-            </div>
-        </div>
-
-        <div class="stat-card">
-            <div class="stat-icon">
-                <i class="fas fa-clipboard-list"></i>
-            </div>
-            <div class="stat-info">
-                <h3>{{ total_templates }}</h3>
-                <p>Templates</p>
-            </div>
-        </div>
-
-        <div class="stat-card">
-            <div class="stat-icon">
-                <i class="fas fa-dumbbell"></i>
-            </div>
-            <div class="stat-info">
-                <h3>{{ total_workouts }}</h3>
-                <p>Assigned Workouts</p>
-            </div>
-        </div>
-
-        <div class="stat-card">
-            <div class="stat-icon">
-                <i class="fas fa-list"></i>
-            </div>
-            <div class="stat-info">
-                <h3>{{ total_exercises }}</h3>
-                <p>Available Exercises</p>
-            </div>
-        </div>
+<section class="section">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px">
+        <h2 class="section-label">Clients</h2>
+        <a href="/admin/workout-composer" class="ui-btn ui-btn-primary ui-btn-sm">+ New template</a>
     </div>
-
-    <!-- Quick Actions -->
-    <div class="quick-actions">
-        <h2><i class="fas fa-bolt"></i> Quick Actions</h2>
-        <div class="action-buttons">
-            <a href="/admin/workout-composer" class="action-btn">
-                <i class="fas fa-plus-circle"></i>
-                <span>New Template</span>
-            </a>
-            <a href="/admin/templates" class="action-btn">
-                <i class="fas fa-clipboard-list"></i>
-                <span>Templates &amp; Assign</span>
-            </a>
-            <a href="/admin/users" class="action-btn">
-                <i class="fas fa-users"></i>
-                <span>Clients</span>
-            </a>
-        </div>
-    </div>
-
-    <div class="dashboard-grid">
-        <!-- Recent Clients -->
-        <div class="dashboard-card">
-            <h2><i class="fas fa-user-friends"></i> Recent Clients</h2>
-            {% if recent_clients %}
-            <div class="users-list">
-                {% for user in recent_clients %}
-                <div class="user-item">
-                    {% if user.profile_picture %}
-                    <img src="{{ user.profile_picture }}" alt="{{ user.full_name }}" class="user-avatar">
-                    {% else %}
-                    <div class="user-avatar-placeholder">{{ user.name[:1] }}{{ user.surname[:1] }}</div>
-                    {% endif %}
-                    <div class="user-info">
-                        <strong>{{ user.full_name }}</strong>
-                        <small>{{ user.email }}</small>
-                    </div>
-                    <a href="/admin/users" class="btn-sm">View</a>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="empty-state">No clients yet</p>
-            {% endif %}
-        </div>
-
-        <!-- Recently Assigned Workouts -->
-        <div class="dashboard-card">
-            <h2><i class="fas fa-history"></i> Recently Assigned</h2>
-            {% if recent_workouts %}
-            <div class="workouts-list">
-                {% for workout in recent_workouts %}
-                <a href="/workouts/{{ workout.id }}" class="workout-item">
-                    <div class="workout-icon">
-                        {% if workout.completed %}
-                        <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
-                        {% else %}
-                        <i class="fas fa-clock" style="color: var(--warning-color);"></i>
-                        {% endif %}
-                    </div>
-                    <div class="workout-info">
-                        <strong>{{ workout.name }}</strong>
-                        <small>{{ workout.client_name }} · {{ workout.completed_set_count }}/{{ workout.set_count }} sets done</small>
-                    </div>
-                </a>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="empty-state">No workouts assigned yet</p>
-            {% endif %}
-        </div>
-    </div>
-</div>
+    {% include "admin/_clients_table.html" %}
+</section>
 {% endblock %}

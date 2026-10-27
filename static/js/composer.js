@@ -1,11 +1,12 @@
 // Workout Composer: build/edit a workout template, or edit a client's assigned workout, as
-// groups of sets (drag exercises from the library), with background live sync + Save/Cancel.
+// groups of sets (drag or tap exercises from the library), with background live sync + Save.
 // Data contract: window.COMPOSER_DATA = { exercises, target, groups }
 //   target = null for a new template, else the template/workout row plus kind: 'templates' | 'workouts'
 //   groups = [{ id, name, note, sets: [{ id, exercise_id, exercise_name, has_*, target_*, rest_seconds, note }] }]
 (function () {
     'use strict';
 
+    const { api, h, ICONS, notify } = window.FitCoach;
     const DATA = window.COMPOSER_DATA || { exercises: [], target: null, groups: [] };
     const TARGET = DATA.target;
     const KIND = TARGET ? TARGET.kind : 'templates';
@@ -22,24 +23,28 @@
         addGroupBtn: document.getElementById('addGroupBtn'),
         saveBtn: document.getElementById('saveBtn'),
         cancelBtn: document.getElementById('cancelBtn'),
+        backLink: document.getElementById('backLink'),
         workoutColumn: document.getElementById('workoutColumn'),
         chips: document.getElementById('libraryChips'),
         search: document.getElementById('librarySearch'),
         status: document.getElementById('saveStatus'),
-        statusText: document.getElementById('saveStatusText')
+        statusText: document.getElementById('saveStatusText'),
+        badge: document.getElementById('statusBadge')
     };
 
     let allowUnload = false;
-
-    function notify(message, type) {
-        if (window.FitCoachUtils) { FitCoachUtils.showNotification(message, type); }
-    }
 
     // ---------- State ----------
     let lidCounter = 0;
     const lid = () => ++lidCounter;
 
     const PARAMS = ['reps', 'weight_kg', 'duration_s', 'distance_m'];
+    const PARAM_FIELDS = [
+        { key: 'weight_kg', label: 'Kg', step: '0.5' },
+        { key: 'reps', label: 'Reps', step: '1' },
+        { key: 'duration_s', label: 'Seconds', step: '5' },
+        { key: 'distance_m', label: 'Metres', step: '10' }
+    ];
 
     // Exercise info for a set: the library entry, or the info that came with the set
     // (covers exercises archived from the library after they were used).
@@ -63,7 +68,7 @@
     }
 
     const state = {
-        // autoName is the fallback used while the admin hasn't typed a name
+        // autoName is the fallback used while the coach hasn't typed a name
         target: {
             id: TARGET ? TARGET.id : null,
             createEnqueued: !IS_NEW,
@@ -82,29 +87,9 @@
     const effectiveName = () => state.target.name.trim() || state.target.autoName;
     const targetUrl = () => '/api/' + KIND + '/' + state.target.id;
 
-    // ---------- API + background sync queue ----------
-    async function api(url, opts) {
-        const options = opts || {};
-        let resp;
-        try {
-            resp = await fetch(url, {
-                method: options.method || 'GET',
-                headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
-                body: options.body ? JSON.stringify(options.body) : undefined
-            });
-        } catch (err) {
-            throw new Error('network unreachable');
-        }
-        if (!resp.ok) {
-            let detail = '';
-            try { detail = (await resp.json()).detail || ''; } catch (_) { /* ignore */ }
-            throw new Error(detail || ('HTTP ' + resp.status));
-        }
-        return resp.json();
-    }
-
+    // ---------- Background sync queue ----------
     // Ops run strictly in order; a failed op stays at the head of the queue and the
-    // whole tail is retried on the next save event (or by clicking the status chip).
+    // whole tail is retried on the next change (or by clicking the save-status text).
     const sync = {
         queue: [],
         running: false,
@@ -161,13 +146,13 @@
     };
 
     function setStatus(mode, pendingLabels) {
-        el.status.className = 'wc-status ' + mode;
+        el.status.className = 'save-state' + (mode === 'error' ? ' error' : '');
         if (mode === 'idle') el.statusText.textContent = 'Not started';
         if (mode === 'saving') el.statusText.textContent = 'Saving…';
         if (mode === 'saved') el.statusText.textContent = 'All changes saved';
         if (mode === 'error') {
             el.statusText.textContent = pendingLabels.length + ' change' +
-                (pendingLabels.length > 1 ? 's' : '') + ' not saved';
+                (pendingLabels.length > 1 ? 's' : '') + ' not saved — retry';
             el.status.title = 'Not saved:\n' + pendingLabels.join('\n') + '\n\nClick to retry now.';
         } else {
             el.status.title = 'Save status';
@@ -183,15 +168,13 @@
         if (!force && !t.name.trim()) return;
         t.createEnqueued = true;
         sync.push('Create template "' + effectiveName() + '"', async () => {
-            const resp = await api('/api/templates', {
-                method: 'POST',
-                body: { name: effectiveName(), description: t.description, duration_minutes: t.duration, note: t.note }
-            });
+            const resp = await api('/api/templates', 'POST',
+                { name: effectiveName(), description: t.description, duration_minutes: t.duration, note: t.note });
             t.id = resp.id;
             if (!t.name.trim()) {
                 t.autoName = 'Unnamed workout ' + resp.id;
                 el.name.placeholder = t.autoName;
-                await api(targetUrl(), { method: 'PUT', body: { name: t.autoName } });
+                await api(targetUrl(), 'PUT', { name: t.autoName });
             }
         });
     }
@@ -212,7 +195,7 @@
                 const body = { name: effectiveName(), description: t.description,
                                duration_minutes: t.duration, note: t.note };
                 if (KIND === 'workouts') body.scheduled_date = t.date || null;
-                await api(targetUrl(), { method: 'PUT', body: body });
+                await api(targetUrl(), 'PUT', body);
             });
         }, 600);
     }
@@ -230,7 +213,7 @@
         state.groups.push(group);
         render();
         sync.push('Add group ' + state.groups.length, async () => {
-            const resp = await api(targetUrl() + '/groups', { method: 'POST' });
+            const resp = await api(targetUrl() + '/groups', 'POST');
             group.id = resp.id;
         });
         return group;
@@ -243,16 +226,20 @@
         group.sets.push(set);
         render();
         sync.push('Add ' + ex.name, async () => {
-            const resp = await api('/api/' + KIND + '/groups/' + group.id + '/sets', {
-                method: 'POST', body: { exercise_id: exerciseId }
-            });
+            const resp = await api('/api/' + KIND + '/groups/' + group.id + '/sets', 'POST', { exercise_id: exerciseId });
             set.id = resp.id;
         });
+        focusFirstInput(set);
     }
 
     function addExerciseAsNewGroup(exerciseId) {
         const group = addGroup();
         addSetToGroup(exerciseId, group);
+    }
+
+    function focusFirstInput(set) {
+        const input = el.groups.querySelector('input[data-set="' + set.lid + '"]');
+        if (input) input.focus({ preventScroll: false });
     }
 
     function duplicateGroup(group, index) {
@@ -263,7 +250,7 @@
         state.groups.splice(index + 1, 0, copy);
         render();
         sync.push('Duplicate group ' + (index + 1), async () => {
-            const resp = await api('/api/' + KIND + '/groups/' + group.id + '/duplicate', { method: 'POST' });
+            const resp = await api('/api/' + KIND + '/groups/' + group.id + '/duplicate', 'POST');
             copy.id = resp.id;
             resp.sets.forEach((serverSet, i) => {
                 if (copy.sets[i]) copy.sets[i].id = serverSet.id;
@@ -277,27 +264,39 @@
         state.groups.splice(index, 1);
         render();
         sync.push('Remove group ' + (index + 1), async () => {
-            await api('/api/' + KIND + '/groups/' + group.id, { method: 'DELETE' });
+            await api('/api/' + KIND + '/groups/' + group.id, 'DELETE');
         });
     }
 
-    function duplicateSet(group, set, setIndex) {
+    function moveGroup(index, delta) {
+        const to = index + delta;
+        if (to < 0 || to >= state.groups.length) return;
+        const moved = state.groups.splice(index, 1)[0];
+        state.groups.splice(to, 0, moved);
+        render();
+        sync.push('Move group ' + (index + 1) + (delta < 0 ? ' up' : ' down'), async () => {
+            // the order as it stands when this op runs (earlier ops have resolved every id by then)
+            await api(targetUrl() + '/groups/order', 'PUT', { ids: state.groups.map((g) => g.id) });
+        });
+    }
+
+    function duplicateSet(group, set) {
         const ex = exerciseOf(set);
         const copy = Object.assign({}, set, { lid: lid(), id: null });
-        group.sets.splice(setIndex + 1, 0, copy);
+        group.sets.splice(group.sets.indexOf(set) + 1, 0, copy);
         render();
         sync.push('Duplicate ' + ex.name, async () => {
-            const resp = await api('/api/' + KIND + '/sets/' + set.id + '/duplicate', { method: 'POST' });
+            const resp = await api('/api/' + KIND + '/sets/' + set.id + '/duplicate', 'POST');
             copy.id = resp.id;
         });
     }
 
-    function removeSet(group, set, setIndex) {
+    function removeSet(group, set) {
         const ex = exerciseOf(set);
-        group.sets.splice(setIndex, 1);
+        group.sets.splice(group.sets.indexOf(set), 1);
         render();
         sync.push('Remove ' + ex.name, async () => {
-            await api('/api/' + KIND + '/sets/' + set.id, { method: 'DELETE' });
+            await api('/api/' + KIND + '/sets/' + set.id, 'DELETE');
         });
     }
 
@@ -316,12 +315,13 @@
             if (isNaN(value) || value < 0 || (!allowZero && value === 0)) return;
         }
         set[field] = value;
+        refreshValidity();
         const ex = exerciseOf(set);
         debouncedPush(set.lid + ':' + field, ex.name + ': ' + label + ' = ' + (value === null ? '—' : value),
             async () => {
                 const body = {};
                 body[field] = value;
-                await api('/api/' + KIND + '/sets/' + set.id, { method: 'PUT', body: body });
+                await api('/api/' + KIND + '/sets/' + set.id, 'PUT', body);
             });
     }
 
@@ -329,196 +329,153 @@
         set.note = rawValue;
         const ex = exerciseOf(set);
         debouncedPush(set.lid + ':note', 'Note on ' + ex.name, async () => {
-            await api('/api/' + KIND + '/sets/' + set.id, { method: 'PUT', body: { note: set.note } });
+            await api('/api/' + KIND + '/sets/' + set.id, 'PUT', { note: set.note });
         });
     }
 
-    function onGroupFieldChanged(group, index, field, rawValue) {
+    function onGroupFieldChanged(group, field, rawValue) {
         group[field] = rawValue;
-        debouncedPush(group.lid + ':' + field, (field === 'name' ? 'Name of' : 'Note on') + ' group ' + (index + 1),
+        debouncedPush(group.lid + ':' + field, (field === 'name' ? 'Name of' : 'Note on') + ' a group',
             async () => {
                 const body = {};
                 body[field] = group[field];
-                await api('/api/' + KIND + '/groups/' + group.id, { method: 'PUT', body: body });
+                await api('/api/' + KIND + '/groups/' + group.id, 'PUT', body);
             });
     }
 
-    // ---------- Rendering ----------
-    const PARAM_FIELDS = [
-        { field: 'target_reps', label: 'Reps', flag: 'has_reps', step: '1' },
-        { field: 'target_weight_kg', label: 'Weight, kg', flag: 'has_weight_kg', step: '0.5' },
-        { field: 'target_duration_s', label: 'Duration, s', flag: 'has_duration_s', step: '5' },
-        { field: 'target_distance_m', label: 'Distance, m', flag: 'has_distance_m', step: '10' }
-    ];
-
-    function iconButton(iconClass, title, danger, onClick) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'wc-icon-btn no-loading' + (danger ? ' danger' : '');
-        btn.title = title;
-        btn.innerHTML = '<i class="fas ' + iconClass + '"></i>';
-        btn.addEventListener('click', onClick);
-        return btn;
-    }
-
-    function noteInput(labelText, placeholder, value, onInput) {
-        const wrap = document.createElement('div');
-        wrap.className = 'wc-note';
-        const label = document.createElement('label');
-        label.textContent = labelText;
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = placeholder;
-        input.maxLength = 500;
-        input.value = value || '';
-        input.addEventListener('input', () => onInput(input.value));
-        wrap.appendChild(label);
-        wrap.appendChild(input);
-        return wrap;
-    }
-
-    function numberInput(labelText, step, min, value, dataset, onInput) {
-        const wrap = document.createElement('div');
-        wrap.className = 'wc-param';
-        const label = document.createElement('label');
-        label.textContent = labelText;
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.inputMode = 'decimal';
-        input.step = step;
-        input.min = min;
-        input.placeholder = '—';
-        Object.assign(input.dataset, dataset || {});
-        if (value !== null && value !== undefined) input.value = value;
-        input.addEventListener('input', () => {
-            input.classList.remove('wc-invalid');
-            onInput(input.value);
+    // ---------- Validation (live) ----------
+    function problems() {
+        const list = [];
+        if (!state.groups.length) list.push('add at least one group');
+        state.groups.forEach((group, gi) => {
+            if (!group.sets.length) list.push('group ' + (gi + 1) + ' is empty');
+            group.sets.forEach((set) => {
+                const ex = exerciseOf(set);
+                PARAM_FIELDS.forEach((p) => {
+                    if (ex['has_' + p.key] && !(set['target_' + p.key] > 0)) {
+                        list.push(ex.name + ' in group ' + (gi + 1) + ': ' + p.label.toLowerCase() + ' missing');
+                    }
+                });
+            });
         });
-        wrap.appendChild(label);
-        wrap.appendChild(input);
-        return wrap;
+        return list;
     }
 
-    function renderSet(group, set, setIndex) {
+    function refreshValidity() {
+        const list = problems();
+        const missing = list.filter((p) => p.indexOf('missing') !== -1).length;
+        el.groups.querySelectorAll('input[data-required]').forEach((input) => {
+            input.classList.toggle('invalid', input.value === '');
+            input.setAttribute('aria-invalid', input.value === '' ? 'true' : 'false');
+        });
+        el.groups.querySelectorAll('.c-missing').forEach((n) => {
+            const set = findSet(n.dataset.set);
+            n.hidden = !set || !setMissing(set).length;
+            if (set) n.textContent = exerciseOf(set).name + ' needs ' + setMissing(set).join(' and ') + ' before this can be ' + (KIND === 'templates' ? 'assigned.' : 'saved.');
+        });
+        if (list.length) {
+            el.badge.className = 'badge badge-red';
+            el.badge.textContent = missing ? missing + (missing === 1 ? ' field missing' : ' fields missing') : 'Not ready';
+        } else if (KIND === 'workouts') {
+            el.badge.className = 'badge';
+            el.badge.textContent = 'Client copy';
+        } else {
+            el.badge.className = 'badge badge-blue';
+            el.badge.textContent = TARGET && TARGET.status === 'ready' ? 'Ready' : 'Ready to save';
+        }
+        el.saveBtn.disabled = list.length > 0;
+        el.saveBtn.title = list.length ? 'To save: ' + list.slice(0, 4).join('; ') : '';
+    }
+
+    function findSet(setLid) {
+        for (const g of state.groups) for (const s of g.sets) if (String(s.lid) === String(setLid)) return s;
+        return null;
+    }
+    function setMissing(set) {
         const ex = exerciseOf(set);
+        return PARAM_FIELDS.filter((p) => ex['has_' + p.key] && !(set['target_' + p.key] > 0)).map((p) => p.label.toLowerCase());
+    }
 
-        const card = document.createElement('div');
-        card.className = 'wc-entry';
+    // ---------- Rendering ----------
+    function numberField(label, value, step, min, attrs, onInput) {
+        const id = 'f' + lid();
+        const input = h('input', Object.assign({ id: id, class: 'input num', type: 'number', inputmode: 'decimal',
+                                                 step: step, min: min, placeholder: '—' }, attrs || {}));
+        if (value !== null && value !== undefined) input.value = value;
+        input.addEventListener('input', () => onInput(input.value));
+        return h('div', { class: 'field' }, h('label', { for: id }, label), input);
+    }
 
-        const head = document.createElement('div');
-        head.className = 'wc-entry-head';
-        const title = document.createElement('span');
-        title.className = 'wc-entry-name';
-        title.textContent = (setIndex + 1) + '. ' + ex.name;
-        const actions = document.createElement('div');
-        actions.className = 'wc-entry-actions';
-        actions.appendChild(iconButton('fa-clone', 'Duplicate set', false,
-            () => duplicateSet(group, set, setIndex)));
-        actions.appendChild(iconButton('fa-times', 'Remove set', true,
-            () => removeSet(group, set, setIndex)));
-        head.appendChild(title);
-        head.appendChild(actions);
-        card.appendChild(head);
-
-        const params = document.createElement('div');
-        params.className = 'wc-entry-params';
-        PARAM_FIELDS.forEach((p) => {
-            if (!ex[p.flag]) return;
-            params.appendChild(numberInput(p.label + ' *', p.step, p.step, set[p.field],
-                { set: set.lid, field: p.field },
-                (v) => onSetFieldChanged(set, p.field, p.label, v, false)));
+    function renderSet(group, set) {
+        const ex = exerciseOf(set);
+        const params = PARAM_FIELDS.filter((p) => ex['has_' + p.key]);
+        const row = h('div', { class: 'c-set', style: '--cols:' + params.length });
+        row.appendChild(h('span', { class: 'c-set-name', title: ex.name }, ex.name));
+        params.forEach((p) => {
+            row.appendChild(numberField(p.label + ' *', set['target_' + p.key], p.step, p.step,
+                { 'data-set': set.lid, 'data-required': '1', 'aria-label': ex.name + ' ' + p.label + ' (required)' },
+                (v) => onSetFieldChanged(set, 'target_' + p.key, p.label, v, false)));
         });
-        params.appendChild(numberInput('Rest after, s', '5', '0', set.rest_seconds, null,
+        row.appendChild(numberField('Rest, s', set.rest_seconds, '5', '0', { 'aria-label': ex.name + ' rest after, seconds' },
             (v) => onSetFieldChanged(set, 'rest_seconds', 'rest', v, true)));
-        card.appendChild(params);
+        row.appendChild(h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.copy, 'aria-label': 'Duplicate ' + ex.name + ' set',
+                                      title: 'Duplicate set', onclick: () => duplicateSet(group, set) }));
+        row.appendChild(h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.x, 'aria-label': 'Remove ' + ex.name + ' set',
+                                      title: 'Remove set', onclick: () => removeSet(group, set) }));
 
-        card.appendChild(noteInput('Note to client', 'Optional note…', set.note,
-            (v) => onSetNoteChanged(set, v)));
-        return card;
+        const note = h('input', { class: 'input', type: 'text', maxlength: '500', placeholder: 'Note to client (optional)',
+                                  'aria-label': 'Note on ' + ex.name, style: 'height: 38px' });
+        note.value = set.note || '';
+        note.addEventListener('input', () => onSetNoteChanged(set, note.value));
+
+        return h('div', { class: 'c-set-wrap' }, row,
+            h('div', { class: 'c-set-note' }, note),
+            h('span', { class: 'c-missing', 'data-set': set.lid, hidden: true }));
     }
 
     function renderGroup(group, index) {
-        const card = document.createElement('div');
-        card.className = 'wc-set';
-        card.dataset.groupLid = group.lid;
+        const card = h('section', { class: 'card c-group', 'data-group-lid': group.lid, 'aria-label': 'Group ' + (index + 1) });
 
-        const head = document.createElement('div');
-        head.className = 'wc-set-head';
-        const title = document.createElement('input');
-        title.type = 'text';
-        title.className = 'wc-group-name';
-        title.placeholder = 'Group ' + (index + 1);
-        title.maxLength = 200;
-        title.value = group.name;
-        title.title = 'Group name (optional)';
-        title.addEventListener('input', () => onGroupFieldChanged(group, index, 'name', title.value));
-        const actions = document.createElement('div');
-        actions.className = 'wc-set-actions';
-        actions.appendChild(iconButton('fa-clone', 'Duplicate group', false, () => duplicateGroup(group, index)));
-        actions.appendChild(iconButton('fa-times', 'Remove group', true, () => removeGroup(group, index)));
-        head.appendChild(title);
-        head.appendChild(actions);
-        card.appendChild(head);
+        const name = h('input', { class: 'c-group-name', type: 'text', maxlength: '200', placeholder: 'Group ' + (index + 1),
+                                  'aria-label': 'Group ' + (index + 1) + ' name (optional)' });
+        name.value = group.name;
+        name.addEventListener('input', () => onGroupFieldChanged(group, 'name', name.value));
+        card.appendChild(h('div', { class: 'c-group-head' },
+            h('span', { class: 'c-group-num' }, String(index + 1)),
+            name,
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.up, 'aria-label': 'Move group ' + (index + 1) + ' up',
+                          disabled: index === 0, onclick: () => moveGroup(index, -1) }),
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.down, 'aria-label': 'Move group ' + (index + 1) + ' down',
+                          disabled: index === state.groups.length - 1, onclick: () => moveGroup(index, 1) }),
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.copy, 'aria-label': 'Duplicate group ' + (index + 1),
+                          title: 'Duplicate group', onclick: () => duplicateGroup(group, index) }),
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.x, 'aria-label': 'Remove group ' + (index + 1),
+                          title: 'Remove group', onclick: () => removeGroup(group, index) })));
 
-        const body = document.createElement('div');
-        body.className = 'wc-set-body';
-        if (!group.sets.length) {
-            const empty = document.createElement('div');
-            empty.className = 'wc-set-empty';
-            empty.textContent = 'Empty group — drop an exercise here';
-            body.appendChild(empty);
-        } else {
-            group.sets.forEach((set, i) => body.appendChild(renderSet(group, set, i)));
-        }
+        const body = h('div', { class: 'c-group-body' });
+        if (!group.sets.length) body.appendChild(h('div', { class: 'c-empty' }, 'Empty group — drop an exercise here'));
+        group.sets.forEach((set) => body.appendChild(renderSet(group, set)));
+
+        const last = group.sets[group.sets.length - 1];
+        const note = h('input', { class: 'input', type: 'text', maxlength: '500', placeholder: 'e.g. Alternate, no rest between',
+                                  'aria-label': 'Group ' + (index + 1) + ' note', style: 'height: 38px' });
+        note.value = group.note;
+        note.addEventListener('input', () => onGroupFieldChanged(group, 'note', note.value));
+        body.appendChild(h('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px' },
+            last ? h('button', { type: 'button', class: 'ui-btn ui-btn-outline ui-btn-sm', style: 'border-style: dashed',
+                                 onclick: () => duplicateSet(group, last) }, '+ Another ' + exerciseOf(last).name + ' set') : null,
+            h('div', { style: 'flex: 1 1 220px' }, note)));
         card.appendChild(body);
-
-        const meta = document.createElement('div');
-        meta.className = 'wc-set-meta';
-        meta.appendChild(noteInput('Note to client', 'Optional note for this group…', group.note,
-            (v) => onGroupFieldChanged(group, index, 'note', v)));
-        card.appendChild(meta);
         return card;
     }
 
     function render() {
         el.groups.innerHTML = '';
         state.groups.forEach((group, i) => el.groups.appendChild(renderGroup(group, i)));
+        refreshValidity();
     }
 
-    // ---------- Save / Cancel ----------
-    function validateAll() {
-        const problems = [];
-        let firstInvalid = null;
-
-        if (!state.groups.length) problems.push('the workout has no groups');
-
-        state.groups.forEach((group, gi) => {
-            if (!group.sets.length) {
-                problems.push('group ' + (gi + 1) + ' is empty');
-                return;
-            }
-            group.sets.forEach((set) => {
-                const ex = exerciseOf(set);
-                PARAM_FIELDS.forEach((p) => {
-                    if (!ex[p.flag]) return;
-                    const v = set[p.field];
-                    if (v === null || v === undefined || v <= 0) {
-                        problems.push(ex.name + ' in group ' + (gi + 1) + ': ' + p.label.toLowerCase() + ' missing');
-                        const input = el.groups.querySelector(
-                            'input[data-set="' + set.lid + '"][data-field="' + p.field + '"]');
-                        if (input) {
-                            input.classList.add('wc-invalid');
-                            firstInvalid = firstInvalid || input;
-                        }
-                    }
-                });
-            });
-        });
-
-        if (firstInvalid) firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return problems;
-    }
-
+    // ---------- Save / Discard ----------
     function doneUrl() {
         return KIND === 'workouts' ? '/workouts/' + state.target.id : '/admin/templates';
     }
@@ -528,25 +485,25 @@
             notify('Nothing to save yet — add exercises first.', 'warning');
             return;
         }
-        const problems = validateAll();
-        if (problems.length) {
-            const extra = problems.length > 3 ? ' (+' + (problems.length - 3) + ' more)' : '';
-            notify('Cannot save: ' + problems.slice(0, 3).join('; ') + extra, 'error');
+        const list = problems();
+        if (list.length) {
+            notify('Cannot save: ' + list.slice(0, 3).join('; ') + (list.length > 3 ? ' (+' + (list.length - 3) + ' more)' : ''), 'error');
             return;
         }
         if (!state.target.name.trim() &&
-            !window.confirm('You haven\'t named this workout — save it as "' +
-                            state.target.autoName + '"?')) {
+            !window.confirm('You haven\'t named this workout — save it as "' + state.target.autoName + '"?')) {
             el.name.focus();
             return;
         }
 
         el.saveBtn.disabled = true;
+        // Debounced edits may still be waiting on their timers: cancel them and queue a full save instead
+        Object.keys(fieldTimers).forEach((k) => { clearTimeout(fieldTimers[k]); });
+        clearTimeout(detailsTimer);
+        flushPendingFields();
         // Saving a template marks it ready (assignable); the server re-validates.
         if (KIND === 'templates') {
-            sync.push('Mark template ready', async () => {
-                await api(targetUrl(), { method: 'PUT', body: { status: 'ready' } });
-            });
+            sync.push('Mark template ready', async () => { await api(targetUrl(), 'PUT', { status: 'ready' }); });
         } else {
             sync.retry();
         }
@@ -559,36 +516,41 @@
         setTimeout(() => { window.location.href = doneUrl(); }, 400);
     }
 
-    // Cancel discards a template created in this session; for an existing template/workout
-    // ("Back") changes are already saved live, so it just flushes and leaves.
-    async function onCancel() {
-        if (!IS_NEW) {
-            el.cancelBtn.disabled = true;
-            sync.retry();
-            await sync.waitIdle();
-            el.cancelBtn.disabled = false;
-            if (sync.queue.length &&
-                !window.confirm('Some changes are not saved yet. Leave anyway?')) return;
-            allowUnload = true;
-            window.location.href = doneUrl();
-            return;
+    // Queue a full save of every field (details, groups, sets); used by Save so nothing typed is lost
+    function flushPendingFields() {
+        const t = state.target;
+        if (t.createEnqueued) {
+            const body = { name: effectiveName(), description: t.description, duration_minutes: t.duration, note: t.note };
+            if (KIND === 'workouts') body.scheduled_date = t.date || null;
+            sync.push('Update workout details', async () => { await api(targetUrl(), 'PUT', body); });
         }
+        state.groups.forEach((group) => {
+            sync.push('Save group', async () => {
+                await api('/api/' + KIND + '/groups/' + group.id, 'PUT', { name: group.name, note: group.note });
+            });
+            group.sets.forEach((set) => {
+                const body = { rest_seconds: set.rest_seconds, note: set.note };
+                PARAMS.forEach((p) => { if (exerciseOf(set)['has_' + p]) body['target_' + p] = set['target_' + p]; });
+                sync.push('Save ' + exerciseOf(set).name, async () => {
+                    await api('/api/' + KIND + '/sets/' + set.id, 'PUT', body);
+                });
+            });
+        });
+    }
 
-        if (state.target.createEnqueued &&
-            !window.confirm('Discard this workout and everything in it?')) return;
-
+    // Discard deletes a template created in this session (only shown for new templates)
+    async function onDiscard() {
+        if (state.target.createEnqueued && !window.confirm('Discard this template and everything in it?')) return;
         el.cancelBtn.disabled = true;
-        // Resolve the template id if the create op is still queued, then delete everything.
         sync.retry();
         await sync.waitIdle();
         sync.queue.length = 0;
-
         if (state.target.id) {
             try {
-                await api(targetUrl(), { method: 'DELETE' });
+                await api(targetUrl(), 'DELETE');
             } catch (err) {
                 el.cancelBtn.disabled = false;
-                notify('Could not discard the workout: ' + err.message, 'error');
+                notify('Could not discard: ' + err.message, 'error');
                 return;
             }
         }
@@ -601,24 +563,29 @@
         const parts = [];
         if (ex.has_reps) parts.push('reps');
         if (ex.has_weight_kg) parts.push('kg');
-        if (ex.has_duration_s) parts.push('sec');
-        if (ex.has_distance_m) parts.push('m');
+        if (ex.has_duration_s) parts.push('seconds');
+        if (ex.has_distance_m) parts.push('metres');
         return parts.join(' · ');
+    }
+
+    function addToLastGroup(exerciseId) {
+        const last = state.groups[state.groups.length - 1];
+        if (last) addSetToGroup(exerciseId, last);
+        else addExerciseAsNewGroup(exerciseId);
     }
 
     function renderLibrary() {
         el.chips.innerHTML = '';
+        if (!DATA.exercises.length) {
+            el.chips.appendChild(h('p', { class: 'muted' }, 'No exercises yet. ', h('a', { href: '/admin/exercises' }, 'Add some')));
+        }
         DATA.exercises.forEach((ex) => {
-            const chip = document.createElement('div');
-            chip.className = 'wc-chip';
-            chip.dataset.name = ex.name.toLowerCase();
-            const strong = document.createElement('strong');
-            strong.textContent = ex.name;
-            const small = document.createElement('small');
-            small.textContent = paramSummary(ex);
-            chip.appendChild(strong);
-            chip.appendChild(small);
-            chip.title = ex.description || ex.name;
+            const chip = h('div', { class: 'chip', 'data-name': ex.name.toLowerCase(), title: ex.description || ex.name },
+                h('span', { html: ICONS.grip }),
+                h('span', { style: 'min-width: 0' }, h('strong', {}, ex.name), h('small', {}, paramSummary(ex))),
+                h('button', { type: 'button', class: 'icon-btn soft chip-add', html: ICONS.plus,
+                              'aria-label': 'Add ' + ex.name + ' to the last group',
+                              onclick: (e) => { e.stopPropagation(); addToLastGroup(ex.id); } }));
             initChipDrag(chip, ex);
             el.chips.appendChild(chip);
         });
@@ -626,8 +593,8 @@
 
     el.search.addEventListener('input', () => {
         const term = el.search.value.trim().toLowerCase();
-        el.chips.querySelectorAll('.wc-chip').forEach((chip) => {
-            chip.classList.toggle('wc-hidden', term !== '' && chip.dataset.name.indexOf(term) === -1);
+        el.chips.querySelectorAll('.chip').forEach((chip) => {
+            chip.hidden = term !== '' && chip.dataset.name.indexOf(term) === -1;
         });
     });
 
@@ -639,7 +606,7 @@
     let dropTarget = null; // {kind: 'group', group} | {kind: 'new'}
 
     function clearDropHighlight() {
-        document.querySelectorAll('.wc-drop-target').forEach((n) => n.classList.remove('wc-drop-target'));
+        document.querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
     }
 
     function updateDropTarget(x, y) {
@@ -647,35 +614,29 @@
         dropTarget = null;
         const under = document.elementFromPoint(x, y);
         if (!under) return;
-        const groupEl = under.closest('.wc-set');
+        const groupEl = under.closest('.c-group');
         if (groupEl) {
             const group = state.groups.find((g) => String(g.lid) === groupEl.dataset.groupLid);
             if (group) {
                 dropTarget = { kind: 'group', group: group };
-                groupEl.classList.add('wc-drop-target');
+                groupEl.classList.add('drop-target');
             }
             return;
         }
-        if (under.closest('#newGroupZone') || under.closest('.wc-main')) {
+        if (under.closest('#newGroupZone') || under.closest('#workoutColumn')) {
             dropTarget = { kind: 'new' };
-            el.newGroupZone.classList.add('wc-drop-target');
+            el.newGroupZone.classList.add('drop-target');
         }
     }
 
     function autoScroll(y) {
-        // The workout column scrolls itself on desktop; the window scrolls on mobile.
-        const col = el.workoutColumn;
-        const scrollable = col.scrollHeight > col.clientHeight + 4;
-        const target = scrollable ? col : window;
-        const top = scrollable ? col.getBoundingClientRect().top : 0;
-        const bottom = scrollable ? col.getBoundingClientRect().bottom : window.innerHeight;
-        if (y < top + 70) target.scrollBy(0, -14);
-        else if (y > bottom - 90) target.scrollBy(0, 14);
+        if (y < 80) window.scrollBy(0, -14);
+        else if (y > window.innerHeight - 90) window.scrollBy(0, 14);
     }
 
     function initChipDrag(chip, exercise) {
         chip.addEventListener('pointerdown', (down) => {
-            if (down.button !== 0) return;
+            if (down.button !== 0 || down.target.closest('button')) return;
             const isTouch = down.pointerType !== 'mouse';
             const startX = down.clientX, startY = down.clientY;
             let ghost = null;
@@ -686,10 +647,10 @@
                 dragging = true;
                 try { chip.setPointerCapture(down.pointerId); } catch (_) { /* ignore */ }
                 ghost = chip.cloneNode(true);
-                ghost.classList.add('wc-ghost');
+                ghost.classList.add('ghost');
                 ghost.style.width = chip.offsetWidth + 'px';
                 document.body.appendChild(ghost);
-                document.body.classList.add('wc-dragging');
+                document.body.classList.add('dragging');
                 moveGhost(x, y);
             }
 
@@ -726,7 +687,7 @@
                 chip.removeEventListener('pointerup', onUp);
                 chip.removeEventListener('pointercancel', cleanup);
                 if (ghost) ghost.remove();
-                document.body.classList.remove('wc-dragging');
+                document.body.classList.remove('dragging');
                 clearDropHighlight();
                 dropTarget = null;
                 dragging = false;
@@ -740,7 +701,7 @@
             chip.addEventListener('pointercancel', cleanup);
         });
         chip.addEventListener('contextmenu', (e) => {
-            if (document.body.classList.contains('wc-dragging')) e.preventDefault();
+            if (document.body.classList.contains('dragging')) e.preventDefault();
         });
     }
 
@@ -750,15 +711,9 @@
     el.duration.value = state.target.duration || '';
     el.note.value = state.target.note;
     if (el.date) el.date.value = state.target.date;
-    if (!IS_NEW) {
-        el.cancelBtn.innerHTML = '<i class="fas fa-arrow-left"></i> Back';
-        setStatus('saved');
-    }
+    if (!IS_NEW) setStatus('saved');
 
-    el.name.addEventListener('input', () => {
-        el.name.classList.remove('wc-invalid');
-        onDetailsChanged();
-    });
+    el.name.addEventListener('input', onDetailsChanged);
     el.description.addEventListener('input', onDetailsChanged);
     el.duration.addEventListener('input', onDetailsChanged);
     el.note.addEventListener('input', onDetailsChanged);
@@ -766,8 +721,18 @@
 
     el.addGroupBtn.addEventListener('click', addGroup);
     el.saveBtn.addEventListener('click', onSave);
-    el.cancelBtn.addEventListener('click', onCancel);
+    if (el.cancelBtn) el.cancelBtn.addEventListener('click', onDiscard);
     el.status.addEventListener('click', () => sync.retry());
+    el.backLink.addEventListener('click', async (e) => {
+        // edits are live-saved; just make sure the queue is flushed before leaving
+        if (!sync.queue.length && !sync.running) return;
+        e.preventDefault();
+        sync.retry();
+        await sync.waitIdle();
+        if (sync.queue.length && !window.confirm('Some changes are not saved yet. Leave anyway?')) return;
+        allowUnload = true;
+        window.location.href = el.backLink.href;
+    });
 
     window.addEventListener('beforeunload', (e) => {
         if (!allowUnload && sync.queue.length) {

@@ -1,0 +1,55 @@
+{% extends "admin/base.html" %}
+{% import "_macros.html" as m %}
+
+{% block title %}{{ workout.client_name }} · {{ workout.name }} - FitCoach{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+<header class="page-bar">
+    <a href="/admin/users" class="back-link">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"></polyline></svg>
+        Clients
+    </a>
+    <div class="title">
+        <h1>{{ workout.client_name }} · {{ workout.name }}</h1>
+        <span class="muted" style="font-size: 14px">
+            {{ m.day(workout.scheduled_date, today) or 'No date' }}{% if workout.duration_minutes %} · {{ workout.duration_minutes }} min{% endif %}{% if template_name %} · from template “{{ template_name }}”{% endif %}
+        </span>
+    </div>
+    <span class="badge" id="statusBadge" style="font-size: 13px; padding: 5px 10px"></span>
+    {% if not workout.completed %}
+    <a href="/admin/workout-composer?workout_id={{ workout.id }}" class="ui-btn ui-btn-outline">Edit {{ workout.client_name.split(' ')[0] }}’s copy</a>
+    {% endif %}
+</header>
+
+<div class="two-col">
+    <div class="main-col">
+        {% if workout.note %}
+        <div class="card card-pad"><span class="field-label">Your note to the client</span><div>{{ workout.note }}</div></div>
+        {% endif %}
+        <div id="groups" style="display: flex; flex-direction: column; gap: 14px"></div>
+    </div>
+
+    <aside class="side-col card chat-panel" aria-label="Chat with {{ workout.client_name }}">
+        <div style="padding: 16px 18px 12px; border-bottom: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 10px">
+            <h2 style="font-size: 17px; font-weight: 800">Chat with {{ workout.client_name.split(' ')[0] }}</h2>
+            <div role="group" aria-label="Show messages" id="threadPills" style="display: flex; gap: 6px; flex-wrap: wrap"></div>
+        </div>
+        <div class="messages" id="chatMessages" aria-live="polite"></div>
+        <form class="compose" id="chatForm">
+            <label for="chatInput" class="sr-only">Reply</label>
+            <input id="chatInput" type="text" maxlength="2000" autocomplete="off">
+            <button type="submit" class="send-btn" aria-label="Send reply">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+        </form>
+    </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.WORKOUT_DATA = {{ workout_data | tojson }};
+</script>
+<script src="/static/js/review.js"></script>
+{% endblock %}

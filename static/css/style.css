@@ -6,9 +6,9 @@
 }
 
 :root {
-    --primary-color: #6366f1;
-    --primary-hover: #4f46e5;
-    --primary-light: #eef2ff;
+    --primary-color: #2B59FF;
+    --primary-hover: #1E44D6;
+    --primary-light: #EEF2FF;
     --secondary-color: #1e293b;
     --accent-color: #0ea5e9;
     --success-color: #10b981;
@@ -39,7 +39,7 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-family: Manrope, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     background-color: var(--light-bg);
     color: var(--gray-900);
     line-height: 1.6;
@@ -217,7 +217,7 @@ body {
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%);
+    background: #F3F4F6;
     padding: 1rem;
 }
 

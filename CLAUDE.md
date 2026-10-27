@@ -32,14 +32,16 @@ python db_tests.py reset-seed              # drop everything, recreate schema, s
 | `db_tests.py` | Schema/seed tool (`seed_sample_data()`, `reset_database()`, `reset-seed` CLI). |
 | `migrations/` | Hand-written SQL migrations, applied **manually** (no runner, no tracking table). `archive/` holds the obsolete pre-v2 ones; v2 migrations start at `004_*.sql`. |
 | `DATA_MODEL.md` | The v2 data model: concepts, tables, rules. |
-| `templates/admin/` | Admin UI: `base.html` (nav), `dashboard.html`, `users.html` (clients + their workouts), `templates.html` (template list + assign modal), `workout_composer.html`. |
-| `templates/user/` | Client UI: `base.html`, `dashboard.html` (workout cards → workout page). |
-| `templates/workout.html` | The workout page, shared by coach and owning client (`{% extends base_template %}` picks the admin or user base). |
-| `templates/` (root) | `base.html` + the auth pages: `login.html`, `signup.html`, `change_password.html`. `base.html` is only for these pre-role pages. |
-| `static/js/main.js` | Generic UI helpers (hamburger menu, flash-message close, `togglePassword`, `Utils` exported as `window.FitCoachUtils`). Feature-specific JS lives in each template's `{% block scripts %}` — except the composer and the workout page. |
-| `static/js/composer.js` | The composer app: local state + render, pointer-event drag-and-drop (mouse and touch), sequential background sync queue with retry. Reads `window.COMPOSER_DATA`. |
-| `static/js/workout.js` | Workout page: client result logging (actual values + Done tick) and chat threads. Reads `window.WORKOUT_DATA`. |
-| `static/css/style.css` | Single stylesheet, CSS variables at top (`--primary-color` etc.). |
+| `templates/admin/` | Coach UI (side-nav shell `base.html`, active item via `nav`): `dashboard.html` (home: needs-attention cards + clients table), `users.html` (clients + workout history), `_clients_table.html` (shared include), `templates.html` (list + multi-client assign panel; `?client_id=` pre-ticks a client), `exercises.html` (library: add/archive/restore), `workout_composer.html`, `workout_review.html` (a client's workout: targets vs actuals + chat panel). |
+| `templates/user/` | Client UI (phone-width shell `base.html`, no nav): `dashboard.html` (In progress / Upcoming / Done), `workout.html` (the workout log). |
+| `templates/_macros.html` | Jinja macros: `day()` (Today/Yesterday/…), `progress()`, `percent()`, icons. Import per template (`{% import "_macros.html" as m %}`) — includes don't see the parent's imports. |
+| `templates/` (root) | `base.html` + the auth pages: `login.html`, `signup.html`, `change_password.html` — still on the old `style.css`/`main.js`. |
+| `static/css/app.css` | The app stylesheet (coach + client screens): tokens on `:root` (`--accent` #2B59FF, Manrope), `ui-btn*`, `card`, `badge*`, `input`, set/log/chat/composer styles. |
+| `static/js/ui.js` | Shared helpers for app screens, `window.FitCoach = {api, h, ICONS, notify, targetText, timeLabel}`; also `window.FitCoachUtils.showNotification`. Toasts go in `.flash-messages`. |
+| `static/js/composer.js` | The composer app: local state + render, pointer-event drag-and-drop (mouse and touch) plus tap-to-add, group up/down reorder, live validation (Save disabled while required targets are missing), sequential background sync queue with retry. Reads `window.COMPOSER_DATA`. |
+| `static/js/workout.js` | Client workout log: actual-value inputs + Done tick per set, rest timer after a ticked set, full-screen chat per set/group/workout (history.pushState, so the phone's back button closes it). Reads `window.WORKOUT_DATA`. |
+| `static/js/review.js` | Coach review: groups as target-vs-done tables, chat panel filtered to a thread by clicking its button. Reads `window.WORKOUT_DATA`. |
+| `static/js/main.js`, `static/css/style.css` | Legacy UI kit, now only used by the auth pages. `main.js` auto-adds "Loading…" spinners to every `.btn` and freezes submit buttons — never load it on app screens. |
 | `todo` | Owner's known-issues/wishlist — check it before "discovering" a bug. |
 | `README.md` | **Outdated** (describes the old Flask version) — do not trust it. |
 
@@ -124,7 +126,9 @@ comments           id, author_id → accounts CASCADE, exactly one of workout_id
 | `GET /api/clients/{id}/workouts` | A client's workouts with set progress counts |
 | `GET/POST /api/templates` | List (with counts) / create a template (`TemplateCreate`) |
 | `GET/PUT/DELETE /api/templates/{id}` | Template + groups / partial update (`TemplateUpdate`; `status: 'ready'` validates first) / delete |
-| `POST /api/templates/{id}/assign` | Copy a ready template to a client (`TemplateAssign`) → `{workout_id}` |
+| `POST /api/templates/{id}/assign` | Copy a ready template to each of `client_ids` (`TemplateAssign`; all validated before any copy) → `{workout_ids}` |
+| `POST /api/exercises` | Add a library exercise (`ExerciseCreate`; ≥1 `has_*`, unique name → 409) |
+| `POST /api/exercises/{id}/archive` / `restore` | Hide from / return to the library |
 | `GET /api/workouts/{id}` | Workout + groups — **admin or owning client** |
 | `PUT/DELETE /api/workouts/{id}` | Partial update (`WorkoutUpdate`, 409 if completed) / delete |
 | `PUT /api/workout-sets/{set_id}/result` | Log `actual_*` and/or `completed` — **admin or owning client** |
@@ -140,22 +144,22 @@ comments           id, author_id → accounts CASCADE, exactly one of workout_id
 
 Errors: API routes don't wrap themselves in try/except — app-level handlers map `ValueError` → 400 and `psycopg2.IntegrityError` → 409; raise `HTTPException` for 401/404/409. Responses are plain dicts (model `to_dict()` plus extras), encoded by FastAPI.
 
-Page routes: `/` `/login` `/signup` `/dashboard` (redirects by role) `/admin/dashboard` `/admin/users` `/admin/templates` `/admin/workout-composer` (`?template_id=` / `?workout_id=` to edit; none = new template) `/workouts/{id}` (coach or owning client) `/user/dashboard` `/change_password` `/logout`, plus the OAuth pair.
+Page routes: `/` `/login` `/signup` `/dashboard` (redirects by role) `/admin/dashboard` `/admin/users` `/admin/templates` `/admin/exercises` `/admin/workout-composer` (`?template_id=` / `?workout_id=` to edit; none = new template) `/workouts/{id}` (coach or owning client) `/user/dashboard` `/change_password` `/logout`, plus the OAuth pair.
 
 ## Frontend Conventions
 
 - Templates extend `templates/admin/base.html` or `templates/user/base.html` (nav + flash messages + `main.js` include). Blocks: `{% block title %}`, `{% block content %}`, `{% block scripts %}`.
 - Every logged-in page handler builds its context with `page_context(request, **extra)` (request, session `name`/`profile_picture`, flash `messages`). Flash messages: `add_flash_message(request, msg, category)` where category ∈ `success|error|info`.
 - Data handed to page JS (`COMPOSER_DATA`, `WORKOUT_DATA`) must go through `jsonable_encoder()` before `| tojson` — Jinja's `tojson` can't serialise dates.
-- Interactivity = `fetch()` against `/api/*`. Icons: Font Awesome 6 (CDN). Modals: hand-rolled `.modal` divs with display toggling (see `admin/users.html`, `admin/templates.html`). Escape user text before `innerHTML` (or build nodes with `textContent`).
+- Interactivity = `FitCoach.api()` against `/api/*`; build DOM with `FitCoach.h()` (text children are text nodes, so user content is never parsed as HTML; `html:` is only for the static `ICONS`). Icons are inline stroke SVGs (no icon font on app screens). Buttons/links use `ui-btn` classes, not `.btn`.
 - **Composer** (`composer.js`): no target = builds a **new template**, created as soon as a name is typed; `?template_id=` / `?workout_id=` loads an existing template / client workout (`target.kind` picks the API). Every action is queued and synced in the background (strictly sequential ops; a failure keeps the op and its tail queued, retried on the next action or by clicking the status chip). **Save** validates required params, flushes the queue, and (templates) marks the template `ready`; **Cancel** deletes a template created in this session, or is **Back** when editing an existing one. Desktop: library left / workout right, each column scrolling independently; mobile: library docks to the bottom.
-- **Workout page** (`workout.js`): the client types actual values and ticks Done (ticking with empty values logs the targets); the coach sees results read-only. Chat threads on the workout, each group and each set.
+- **`/workouts/{id}`** renders two different screens from the same data: `user/workout.html` (client log) or `admin/workout_review.html` (coach review). Ticking a set with empty inputs logs the targets ("done as planned").
 - HTML5 drag events don't fire on touch devices — the composer uses Pointer Events (long-press to lift on touch, `elementFromPoint` for drop targets). Reuse that pattern for any new drag-and-drop.
 
 ## Gotchas & Known Broken Things (verify before building on top)
 
-1. **No reordering UI yet**: the reorder endpoints exist (`.../groups/order`, `.../sets/order`) but the composer only adds/duplicates/removes; duplicates insert right after the original.
-2. **No exercise-library UI**: exercises are created by seeding/DB; `archive_exercise()` exists without a route.
+1. **Reordering**: groups move with up/down buttons in the composer; sets within a group can't be reordered in the UI yet (the endpoint exists). Duplicates insert right after the original.
+2. **"Needs attention" has no read tracking**: a thread counts as unanswered while its latest message is from the client; overdue = unfinished with a past `scheduled_date`; "no plan" = no unfinished workout.
 3. **Session secret** comes from `SESSION_SECRET`, falling back to the in-repo dev literal if unset — any deployed environment MUST set it or session cookies are forgeable. No CSRF protection on forms or the JSON API. Known debt, not accidental.
 4. **Editing a ready template doesn't re-validate until Save** — a coach can leave a ready template half-edited; `assign` re-validates server-side, so a broken template can't be assigned.
 5. Broad `except Exception` → flash-message-and-redirect is the standard error pattern in page routes. API routes rely on the app-level exception handlers instead.

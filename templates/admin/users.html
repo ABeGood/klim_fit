@@ -1,147 +1,66 @@
 {% extends "admin/base.html" %}
+{% import "_macros.html" as m %}
 
-{% block title %}Clients - FitCoach Admin{% endblock %}
+{% block title %}Clients - FitCoach{% endblock %}
 
 {% block content %}
-<div class="users-page">
-    <div class="page-header">
-        <h1><i class="fas fa-users"></i> Clients</h1>
-        <p>All registered clients and their workouts</p>
-    </div>
+<header>
+    <h1 class="page-title">Clients</h1>
+    <p class="muted">Everyone who signed up, what they're working on, and their workout history.</p>
+</header>
 
-    {% if users %}
-    <div class="users-table-container">
-        <table class="users-table">
-            <thead>
-                <tr>
-                    <th>Client</th>
-                    <th>Email</th>
-                    <th>Age</th>
-                    <th>Weight (kg)</th>
-                    <th>Created</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for user in users %}
-                <tr>
-                    <td>
-                        <div class="user-cell">
-                            {% if user.profile_picture %}
-                            <img src="{{ user.profile_picture }}" alt="{{ user.full_name }}" class="table-avatar">
-                            {% else %}
-                            <div class="table-avatar-placeholder">{{ user.name[:1] }}{{ user.surname[:1] }}</div>
-                            {% endif %}
-                            <span>{{ user.full_name }}</span>
-                        </div>
-                    </td>
-                    <td>{{ user.email }}</td>
-                    <td>{{ user.age if user.age else '-' }}</td>
-                    <td>{{ user.weight_kg if user.weight_kg else '-' }}</td>
-                    <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
-                    <td>
-                        <div class="action-buttons-inline">
-                            <button type="button" class="btn-sm no-loading" data-id="{{ user.id }}"
-                                    data-name="{{ user.full_name }}" onclick="viewUserWorkouts(this)">
-                                <i class="fas fa-dumbbell"></i> Workouts
-                            </button>
-                            <a href="/admin/templates" class="btn-sm btn-primary">
-                                <i class="fas fa-user-plus"></i> Assign
-                            </a>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state-large">
-        <i class="fas fa-users fa-4x"></i>
-        <h2>No Clients Yet</h2>
-        <p>Clients will appear here when they sign up</p>
-    </div>
-    {% endif %}
-</div>
+{% if clients is defined %}
+{% include "admin/_clients_table.html" %}
 
-<!-- User Workouts Modal -->
-<div id="workoutsModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 id="modalUserName">User Workouts</h2>
-            <span class="close">&times;</span>
+<section class="section">
+    <h2 class="section-label">Workout history</h2>
+    {% for c in clients %}
+    <details class="card" {% if loop.first %}open{% endif %}>
+        <summary style="cursor: pointer; padding: 14px 18px; font-weight: 700; display: flex; justify-content: space-between; gap: 12px">
+            <span>{{ c.full_name }}</span>
+            <span class="muted" style="font-weight: 600">{{ c.workouts | length }} workout{{ 's' if c.workouts | length != 1 }}</span>
+        </summary>
+        {% if c.workouts %}
+        <div class="table-wrap">
+            <table class="table" style="min-width: 600px">
+                <thead><tr><th scope="col">Workout</th><th scope="col">Date</th><th scope="col">Progress</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+                <tbody>
+                    {% for w in c.workouts %}
+                    <tr>
+                        <td><strong>{{ w.name }}</strong></td>
+                        <td class="muted">{{ m.day(w.scheduled_date, today) or 'No date' }}</td>
+                        <td>
+                            {% if w.completed %}<span class="badge badge-blue">Completed</span>
+                            {% else %}<div class="mini-progress">{{ m.progress(w.completed_set_count, w.set_count) }}<span style="font-size: 13px; font-weight: 600">{{ w.completed_set_count }}/{{ w.set_count }}</span></div>{% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap">
+                            <a href="/workouts/{{ w.id }}" class="ui-btn ui-btn-ghost">Open</a>
+                            {% if not w.completed %}<a href="/admin/workout-composer?workout_id={{ w.id }}" class="ui-btn ui-btn-ghost">Edit</a>{% endif %}
+                            <button type="button" class="ui-btn ui-btn-ghost" style="color: var(--danger-ink)" data-id="{{ w.id }}" data-name="{{ w.name }}" data-client="{{ c.full_name }}" onclick="deleteWorkout(this)">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-        <div class="modal-body" id="modalWorkoutsContent">
-            <div class="loading">Loading...</div>
-        </div>
-    </div>
-</div>
+        {% else %}
+        <p class="empty">No workouts yet. <a href="/admin/templates?client_id={{ c.id }}">Assign a template</a></p>
+        {% endif %}
+    </details>
+    {% endfor %}
+</section>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-const modal = document.getElementById('workoutsModal');
-const span = document.getElementsByClassName('close')[0];
-
-span.onclick = function() {
-    modal.style.display = 'none';
-}
-
-window.onclick = function(event) {
-    if (event.target == modal) {
-        modal.style.display = 'none';
-    }
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text == null ? '' : String(text);
-    return div.innerHTML;
-}
-
-async function viewUserWorkouts(btn) {
-    const content = document.getElementById('modalWorkoutsContent');
-    document.getElementById('modalUserName').textContent = `${btn.dataset.name}'s Workouts`;
-    content.innerHTML = '<div class="loading">Loading...</div>';
-    modal.style.display = 'block';
-
+async function deleteWorkout(btn) {
+    if (!confirm('Delete "' + btn.dataset.name + '" for ' + btn.dataset.client + '? Their logged results and chat for it are deleted too.')) return;
     try {
-        const response = await fetch(`/api/clients/${btn.dataset.id}/workouts`);
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        const workouts = await response.json();
-
-        if (workouts.length === 0) {
-            content.innerHTML = '<p class="empty-state">No workouts assigned yet</p>';
-            return;
-        }
-
-        let html = '<div class="workouts-list">';
-        workouts.forEach(workout => {
-            const statusIcon = workout.completed ?
-                '<i class="fas fa-check-circle" style="color: var(--success-color);"></i>' :
-                '<i class="fas fa-clock" style="color: var(--warning-color);"></i>';
-            const date = workout.scheduled_date || 'Not scheduled';  // plain YYYY-MM-DD, no timezone shift
-
-            html += `
-                <div class="workout-item-modal">
-                    ${statusIcon}
-                    <div class="workout-details">
-                        <h4>${escapeHtml(workout.name)}</h4>
-                        <p>${escapeHtml(workout.description || 'No description')}</p>
-                        <small>Date: ${date} | ${workout.completed_set_count}/${workout.set_count} sets done</small>
-                        <div class="action-buttons-inline">
-                            <a href="/workouts/${workout.id}" class="btn-sm"><i class="fas fa-eye"></i> Open</a>
-                            ${workout.completed ? '' : `<a href="/admin/workout-composer?workout_id=${workout.id}" class="btn-sm"><i class="fas fa-edit"></i> Edit</a>`}
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        html += '</div>';
-
-        content.innerHTML = html;
-    } catch (error) {
-        content.innerHTML = '<p class="error">Failed to load workouts</p>';
+        await FitCoach.api('/api/workouts/' + btn.dataset.id, 'DELETE');
+        location.reload();
+    } catch (err) {
+        FitCoach.notify('Could not delete: ' + err.message, 'error');
     }
 }
 </script>

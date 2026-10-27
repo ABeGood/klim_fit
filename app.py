@@ -6,7 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from database_manager import DatabaseManager
-from models import Account, WorkoutTemplate, Comment
+from models import Account, Exercise, WorkoutTemplate, Comment
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from enum import Enum
@@ -78,8 +78,16 @@ class TemplateUpdate(BaseModel):
     status: Optional[str] = None
 
 class TemplateAssign(BaseModel):
-    client_id: int
+    client_ids: List[int] = Field(min_length=1)  # each client gets their own copy
     scheduled_date: Optional[date] = None
+
+class ExerciseCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    has_reps: bool = False
+    has_weight_kg: bool = False
+    has_duration_s: bool = False
+    has_distance_m: bool = False
 
 class WorkoutUpdate(BaseModel):
     name: Optional[str] = None
@@ -393,34 +401,47 @@ async def logout(request: Request):
 # ============ ADMIN PAGES ============
 @app.get('/admin/dashboard', response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
+    """Coach home: what needs attention + every client's progress"""
     if not is_admin(request):
         return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
 
     try:
         return templates.TemplateResponse(request, 'admin/dashboard.html', page_context(
-            request,
-            total_clients=db.count_clients(),
-            total_templates=db.count_templates(),
-            total_workouts=db.count_workouts(),
-            total_exercises=db.count_exercises(),
-            recent_clients=db.get_recent_clients(5),
-            recent_workouts=db.get_recent_workouts(5)
+            request, nav='home', today=date.today(),
+            attention=db.get_attention_items(),
+            clients=db.get_clients_overview()
         ))
     except Exception as e:
         add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'admin/dashboard.html', page_context(request))
+        return templates.TemplateResponse(request, 'admin/dashboard.html', page_context(request, nav='home'))
 
 @app.get('/admin/users', response_class=HTMLResponse)
 async def admin_users(request: Request):
+    """Clients: the overview table plus each client's full workout history"""
     if not is_admin(request):
         return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
 
     try:
+        clients = db.get_clients_overview()
+        for client in clients:
+            client['workouts'] = db.get_client_workouts(client['id'])
         return templates.TemplateResponse(request, 'admin/users.html', page_context(
-            request, users=db.get_clients()))
+            request, nav='clients', today=date.today(), clients=clients))
     except Exception as e:
         add_flash_message(request, f'Error loading clients: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'admin/users.html', page_context(request))
+        return templates.TemplateResponse(request, 'admin/users.html', page_context(request, nav='clients'))
+
+@app.get('/admin/exercises', response_class=HTMLResponse)
+async def admin_exercises(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url='/login', status_code=status.HTTP_302_FOUND)
+
+    try:
+        return templates.TemplateResponse(request, 'admin/exercises.html', page_context(
+            request, nav='exercises', exercises=db.get_exercises_with_usage()))
+    except Exception as e:
+        add_flash_message(request, f'Error loading exercises: {str(e)}', 'error')
+        return templates.TemplateResponse(request, 'admin/exercises.html', page_context(request, nav='exercises'))
 
 @app.get('/admin/templates', response_class=HTMLResponse)
 async def admin_templates(request: Request):
@@ -429,13 +450,15 @@ async def admin_templates(request: Request):
 
     try:
         return templates.TemplateResponse(request, 'admin/templates.html', page_context(
-            request,
+            request, nav='templates',
             workout_templates=db.get_templates(),
-            clients=[c.to_public_dict() for c in db.get_clients()]
+            template_problems={t['id']: db.validate_structure('templates', t['id'])
+                               for t in db.get_templates() if t['status'] == 'draft'},
+            clients=jsonable_encoder(db.get_clients_overview())
         ))
     except Exception as e:
         add_flash_message(request, f'Error loading templates: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'admin/templates.html', page_context(request))
+        return templates.TemplateResponse(request, 'admin/templates.html', page_context(request, nav='templates'))
 
 @app.get('/admin/workout-composer', response_class=HTMLResponse)
 async def admin_workout_composer(request: Request, template_id: Optional[int] = None,
@@ -472,10 +495,10 @@ async def admin_workout_composer(request: Request, template_id: Optional[int] = 
             'groups': groups
         }
         return templates.TemplateResponse(request, 'admin/workout_composer.html', page_context(
-            request, composer_data=jsonable_encoder(composer_data)))
+            request, nav='templates', composer_data=jsonable_encoder(composer_data)))
     except Exception as e:
         add_flash_message(request, f'Error loading composer: {str(e)}', 'error')
-        return templates.TemplateResponse(request, 'admin/workout_composer.html', page_context(request))
+        return templates.TemplateResponse(request, 'admin/workout_composer.html', page_context(request, nav='templates'))
 
 # ============ CLIENT PAGES ============
 @app.get('/user/dashboard', response_class=HTMLResponse)
@@ -485,13 +508,16 @@ async def user_dashboard(request: Request):
 
     try:
         workouts = db.get_client_workouts(request.session.get('user_id'))
-        completed = len([w for w in workouts if w['completed']])
+        today = date.today()
+        # In progress = started or due; upcoming = scheduled later (or undated and untouched); done = completed
+        open_ = [w for w in workouts if not w['completed']]
+        in_progress = [w for w in open_ if w['completed_set_count'] or (w['scheduled_date'] and w['scheduled_date'] <= today)]
+        upcoming = sorted([w for w in open_ if w not in in_progress],
+                          key=lambda w: (w['scheduled_date'] is None, w['scheduled_date'] or today))
+        done = sorted([w for w in workouts if w['completed']], key=lambda w: w['completed_at'], reverse=True)
         return templates.TemplateResponse(request, 'user/dashboard.html', page_context(
-            request,
-            workouts=workouts,
-            total_workouts=len(workouts),
-            completed_workouts=completed,
-            pending_workouts=len(workouts) - completed
+            request, today=today, in_progress=in_progress, upcoming=upcoming, done=done,
+            first_name=(request.session.get('name') or '').split(' ')[0]
         ))
     except Exception as e:
         add_flash_message(request, f'Error loading dashboard: {str(e)}', 'error')
@@ -518,18 +544,41 @@ async def workout_page(request: Request, workout_id: int):
         'comments': db.get_workout_comments(workout_id),
         'viewer': {'id': request.session.get('user_id'), 'is_admin': viewer_is_admin}
     }
-    return templates.TemplateResponse(request, 'workout.html', page_context(
-        request,
-        base_template='admin/base.html' if viewer_is_admin else 'user/base.html',
-        workout=workout_data['workout'],
-        workout_data=jsonable_encoder(workout_data)
-    ))
+    template = db.get_template(workout.template_id) if viewer_is_admin and workout.template_id else None
+    # Same data, two screens: the client's workout log vs the coach's review
+    return templates.TemplateResponse(request, 'admin/workout_review.html' if viewer_is_admin else 'user/workout.html',
+                                      page_context(request, nav='clients', today=date.today(),
+                                                   template_name=template.name if template else None,
+                                                   workout=workout_data['workout'],
+                                                   workout_data=jsonable_encoder(workout_data)))
 
 # ============ API: library & clients (admin) ============
 @app.get('/api/exercises')
 async def api_exercises(request: Request):
     require_admin(request)
     return [exercise_dict(e) for e in db.get_exercises()]
+
+@app.post('/api/exercises')
+async def api_create_exercise(request: Request, body: ExerciseCreate):
+    require_admin(request)
+    changes = changes_from(body)
+    exercise = db.create_exercise(Exercise(created_by=request.session.get('user_id'), **changes))
+    return exercise_dict(exercise)
+
+@app.post('/api/exercises/{exercise_id}/archive')
+async def api_archive_exercise(request: Request, exercise_id: int):
+    """Hide from the library; templates and workouts that use it keep it"""
+    require_admin(request)
+    if not db.archive_exercise(exercise_id):
+        raise HTTPException(status_code=404, detail='Exercise not found')
+    return {'message': 'Exercise archived'}
+
+@app.post('/api/exercises/{exercise_id}/restore')
+async def api_restore_exercise(request: Request, exercise_id: int):
+    require_admin(request)
+    if not db.restore_exercise(exercise_id):
+        raise HTTPException(status_code=404, detail='Exercise not found')
+    return {'message': 'Exercise restored'}
 
 @app.get('/api/clients')
 async def api_clients(request: Request):
@@ -585,7 +634,7 @@ async def api_delete_template(request: Request, template_id: int):
 
 @app.post('/api/templates/{template_id}/assign')
 async def api_assign_template(request: Request, template_id: int, body: TemplateAssign):
-    """Copy a ready template into a new workout for a client"""
+    """Copy a ready template into a new workout for each listed client"""
     require_admin(request)
     template = db.get_template(template_id)
     if not template:
@@ -595,11 +644,14 @@ async def api_assign_template(request: Request, template_id: int, body: Template
     problems = db.validate_structure('templates', template_id)
     if problems:
         raise HTTPException(status_code=400, detail='Template is not ready: ' + '; '.join(problems))
-    client = db.get_account(body.client_id)
-    if not client or client.is_admin:
-        raise HTTPException(status_code=404, detail='Client not found')
-    workout_id = db.assign_template(template_id, body.client_id, request.session.get('user_id'), body.scheduled_date)
-    return {'workout_id': workout_id, 'client_id': body.client_id, 'template_id': template_id}
+    client_ids = list(dict.fromkeys(body.client_ids))
+    for client_id in client_ids:  # validate all before copying any
+        client = db.get_account(client_id)
+        if not client or client.is_admin:
+            raise HTTPException(status_code=404, detail=f'Client {client_id} not found')
+    workout_ids = [db.assign_template(template_id, client_id, request.session.get('user_id'), body.scheduled_date)
+                   for client_id in client_ids]
+    return {'workout_ids': workout_ids, 'client_ids': client_ids, 'template_id': template_id}
 
 # ============ API: client workouts ============
 @app.get('/api/workouts/{workout_id}')

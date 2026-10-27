@@ -1,0 +1,89 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Exercises - FitCoach{% endblock %}
+
+{% block content %}
+<header>
+    <h1 class="page-title">Exercises</h1>
+    <p class="muted">The library you build templates from. An exercise in use can’t be deleted — archive it to hide it from the composer; existing workouts keep it.</p>
+</header>
+
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px">
+    <section class="card table-wrap" style="flex: 999 1 460px; min-width: 0">
+        <table class="table" style="min-width: 520px">
+            <thead><tr><th scope="col">Exercise</th><th scope="col">Records</th><th scope="col">Used in</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody>
+                {% for e in exercises or [] %}
+                {% set params = [] %}
+                {% if e.has_reps %}{% set _ = params.append('reps') %}{% endif %}
+                {% if e.has_weight_kg %}{% set _ = params.append('kg') %}{% endif %}
+                {% if e.has_duration_s %}{% set _ = params.append('seconds') %}{% endif %}
+                {% if e.has_distance_m %}{% set _ = params.append('metres') %}{% endif %}
+                <tr {% if e.archived_at %}style="opacity: 0.6"{% endif %}>
+                    <td><strong>{{ e.name }}</strong>{% if e.archived_at %} <span class="badge">Archived</span>{% endif %}{% if e.description %}<span class="sub">{{ e.description }}</span>{% endif %}</td>
+                    <td>{{ params | join(' · ') }}</td>
+                    <td class="muted">{{ e.usage_count }} set{{ 's' if e.usage_count != 1 }}</td>
+                    <td style="text-align: right">
+                        {% if e.archived_at %}
+                        <button type="button" class="ui-btn ui-btn-ghost" data-id="{{ e.id }}" onclick="setArchived(this, 'restore')">Restore</button>
+                        {% else %}
+                        <button type="button" class="ui-btn ui-btn-ghost" data-id="{{ e.id }}" onclick="setArchived(this, 'archive')">Archive</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="empty">No exercises yet — add the first one.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <form class="card card-pad" id="newExercise" style="flex: 1 1 320px; max-width: 100%; display: flex; flex-direction: column; gap: 14px">
+        <h2 style="font-size: 18px; font-weight: 800">Add exercise</h2>
+        <div class="field">
+            <label for="exName">Name</label>
+            <input id="exName" class="input" required maxlength="200" placeholder="e.g. Overhead Press">
+        </div>
+        <div class="field">
+            <label for="exDesc">Description (optional)</label>
+            <textarea id="exDesc" class="input" rows="2" placeholder="What it trains, cues…"></textarea>
+        </div>
+        <fieldset style="border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+            <legend class="field-label" style="margin-bottom: 6px">The client records</legend>
+            <div class="check-row">
+                <label class="check"><input type="checkbox" name="param" value="has_reps" checked> Reps</label>
+                <label class="check"><input type="checkbox" name="param" value="has_weight_kg"> Weight (kg)</label>
+                <label class="check"><input type="checkbox" name="param" value="has_duration_s"> Time (s)</label>
+                <label class="check"><input type="checkbox" name="param" value="has_distance_m"> Distance (m)</label>
+            </div>
+        </fieldset>
+        <button type="submit" class="ui-btn ui-btn-primary">Add exercise</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('newExercise').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = { name: document.getElementById('exName').value, description: document.getElementById('exDesc').value };
+    document.querySelectorAll('input[name=param]').forEach((b) => { body[b.value] = b.checked; });
+    if (!document.querySelector('input[name=param]:checked')) { FitCoach.notify('Pick at least one thing the client records.', 'warning'); return; }
+    try {
+        await FitCoach.api('/api/exercises', 'POST', body);
+        location.reload();
+    } catch (err) {
+        FitCoach.notify('Could not add: ' + err.message, 'error');
+    }
+});
+
+async function setArchived(btn, action) {
+    try {
+        await FitCoach.api('/api/exercises/' + btn.dataset.id + '/' + action, 'POST');
+        location.reload();
+    } catch (err) {
+        FitCoach.notify('Failed: ' + err.message, 'error');
+    }
+}
+</script>
+{% endblock %}

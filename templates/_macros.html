@@ -1,0 +1,27 @@
+{# Shared Jinja macros for the app screens. Import with: {% import "_macros.html" as m %} #}
+
+{# "Today" / "Yesterday" / "Tomorrow" / "Wed, Oct 29"; empty string for no date #}
+{% macro day(d, today) -%}
+{%- if not d -%}
+{%- elif d == today -%}Today
+{%- elif (today - d).days == 1 -%}Yesterday
+{%- elif (d - today).days == 1 -%}Tomorrow
+{%- else -%}{{ d.strftime('%a, %b %-d') }}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro percent(done, total) -%}{{ ((done / total) * 100) | round | int if total else 0 }}{%- endmacro %}
+
+{% macro progress(done, total, label) -%}
+<div class="progress" role="progressbar" aria-label="{{ label or 'Sets done' }}" aria-valuemin="0" aria-valuemax="{{ total }}" aria-valuenow="{{ done }}">
+    <span style="width: {{ percent(done, total) }}%"></span>
+</div>
+{%- endmacro %}
+
+{% macro chevron() -%}
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B616E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"></polyline></svg>
+{%- endmacro %}
+
+{% macro check(size=22) -%}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 7"></polyline></svg>
+{%- endmacro %}

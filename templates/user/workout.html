@@ -1,0 +1,73 @@
+{% extends "user/base.html" %}
+{% import "_macros.html" as m %}
+
+{% block title %}{{ workout.name }} - FitCoach{% endblock %}
+
+{% block content %}
+<header class="log-header">
+    <a href="/user/dashboard" class="back-link">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"></polyline></svg>
+        My workouts
+    </a>
+    <div>
+        <h1 class="page-title" style="font-size: 26px">{{ workout.name }}</h1>
+        <div class="muted" style="font-size: 14px">
+            {{ m.day(workout.scheduled_date, today) or 'Anytime' }}{% if workout.duration_minutes %} · {{ workout.duration_minutes }} min{% endif %}{% if workout.description %} · {{ workout.description }}{% endif %}
+        </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+        <div class="progress-row"><span id="progressText"></span><span class="muted" id="progressPct"></span></div>
+        <div class="progress" role="progressbar" aria-label="Sets done" id="progressBar"><span></span></div>
+    </div>
+    {% if workout.note %}
+    <div class="coach-line"><span><strong>Coach:</strong> {{ workout.note }}</span></div>
+    {% endif %}
+</header>
+
+<div class="client-body" style="gap: 14px">
+    <div id="groups" style="display: flex; flex-direction: column; gap: 14px"></div>
+    <button type="button" id="workoutChatBtn" class="card list-card" style="border: none; text-align: left; font: inherit; cursor: pointer; width: 100%">
+        <span style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0">
+            <span style="font-size: 16px; font-weight: 700">Workout chat</span>
+            <span class="muted" id="workoutChatPreview" style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Message your coach about this workout</span>
+        </span>
+        {{ m.chevron() }}
+    </button>
+</div>
+
+<div class="rest-bar" id="restBar" hidden role="status">
+    <div style="flex: 1; min-width: 0">
+        <small id="restNext">Rest</small>
+        <span class="rest-clock" id="restClock">0:00</span>
+    </div>
+    <button type="button" class="ui-btn dark" id="restAdd">+15s</button>
+    <button type="button" class="ui-btn ui-btn-primary" id="restSkip">Skip</button>
+</div>
+
+<section class="chat-screen" id="chatScreen" hidden aria-labelledby="chatTitle">
+    <div class="chat-head">
+        <button type="button" class="back-link" id="chatBack" style="background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; align-self: flex-start">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"></polyline></svg>
+            {{ workout.name }}
+        </button>
+        <h2 id="chatTitle"></h2>
+        <div class="muted" id="chatSub" style="font-size: 14px"></div>
+        <div class="chat-facts" id="chatFacts"></div>
+    </div>
+    <div class="messages" id="chatMessages" aria-live="polite"></div>
+    <form class="compose" id="chatForm">
+        <label for="chatInput" class="sr-only">Message your coach</label>
+        <input id="chatInput" type="text" maxlength="2000" placeholder="Message your coach…" autocomplete="off">
+        <button type="submit" class="send-btn" aria-label="Send message">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+    </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.WORKOUT_DATA = {{ workout_data | tojson }};
+</script>
+<script src="/static/js/workout.js"></script>
+{% endblock %}

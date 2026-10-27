@@ -1,110 +1,102 @@
 {% extends "user/base.html" %}
+{% import "_macros.html" as m %}
 
-{% block title %}My Workouts - FitCoach{% endblock %}
+{% block title %}My workouts - FitCoach{% endblock %}
 
 {% block content %}
-<div class="dashboard">
-    <div class="dashboard-header">
-        <h1>Welcome back, {{ name }}!</h1>
-        <p>Track your fitness journey</p>
+<header class="client-top">
+    <div>
+        <div class="muted" style="font-size: 14px; font-weight: 500">Hi, {{ first_name }}</div>
+        <h1 class="page-title" style="font-size: 28px">My workouts</h1>
     </div>
-
-    <!-- Statistics Cards -->
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-icon">
-                <i class="fas fa-dumbbell"></i>
-            </div>
-            <div class="stat-info">
-                <h3>{{ total_workouts }}</h3>
-                <p>Total Workouts</p>
-            </div>
+    <details style="position: relative">
+        <summary style="list-style: none; cursor: pointer" aria-label="Account menu">
+            {% if profile_picture %}
+            <img src="{{ profile_picture }}" alt="" class="avatar" style="width: 44px; height: 44px; border-radius: 22px">
+            {% else %}
+            <span class="avatar" style="width: 44px; height: 44px; border-radius: 22px; font-size: 15px">{{ (name or 'U')[:1] }}</span>
+            {% endif %}
+        </summary>
+        <div class="card" style="position: absolute; right: 0; top: 52px; z-index: 10; padding: 6px; min-width: 190px; box-shadow: var(--shadow-lg)">
+            <a href="/change_password" class="nav-item">Change password</a>
+            <a href="/logout" class="nav-item">Log out</a>
         </div>
+    </details>
+</header>
 
-        <div class="stat-card">
-            <div class="stat-icon" style="background: var(--success-color);">
-                <i class="fas fa-check-circle"></i>
-            </div>
-            <div class="stat-info">
-                <h3>{{ completed_workouts }}</h3>
-                <p>Completed</p>
-            </div>
-        </div>
-
-        <div class="stat-card">
-            <div class="stat-icon" style="background: var(--warning-color);">
-                <i class="fas fa-clock"></i>
-            </div>
-            <div class="stat-info">
-                <h3>{{ pending_workouts }}</h3>
-                <p>Pending</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Workouts List -->
-    <div class="workouts-section">
-        <h2><i class="fas fa-list"></i> My Workouts</h2>
-
-        {% if workouts %}
-        <div class="workouts-grid">
-            {% for workout in workouts %}
-            <div class="workout-card {% if workout.completed %}completed{% endif %}">
-                <div class="workout-card-header">
-                    <div class="workout-status">
-                        {% if workout.completed %}
-                        <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
-                        <span class="status-badge completed">Completed</span>
-                        {% else %}
-                        <i class="fas fa-clock" style="color: var(--warning-color);"></i>
-                        <span class="status-badge pending">Pending</span>
-                        {% endif %}
-                    </div>
-                    <h3>{{ workout.name }}</h3>
-                </div>
-
-                <div class="workout-card-body">
-                    {% if workout.description %}
-                    <p class="workout-description">{{ workout.description }}</p>
-                    {% endif %}
-
-                    <div class="workout-meta">
-                        <div class="meta-item">
-                            <i class="fas fa-calendar"></i>
-                            <span>{{ workout.scheduled_date.strftime('%B %d, %Y') if workout.scheduled_date else 'Not scheduled' }}</span>
-                        </div>
-                        {% if workout.duration_minutes %}
-                        <div class="meta-item">
-                            <i class="fas fa-stopwatch"></i>
-                            <span>{{ workout.duration_minutes }} min</span>
-                        </div>
-                        {% endif %}
-                        <div class="meta-item">
-                            <i class="fas fa-tasks"></i>
-                            <span>{{ workout.completed_set_count }}/{{ workout.set_count }} sets done</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="workout-card-footer">
-                    <a href="/workouts/{{ workout.id }}" class="btn btn-primary">
-                        {% if workout.completed %}
-                        <i class="fas fa-eye"></i> View
-                        {% else %}
-                        <i class="fas fa-play"></i> Open Workout
-                        {% endif %}
-                    </a>
+<div class="client-body">
+    {% if in_progress %}
+    <section class="section">
+        <h2 class="section-label">In progress</h2>
+        {% for w in in_progress %}
+        <div class="card workout-card">
+            <div>
+                <div class="workout-title">{{ w.name }}</div>
+                <div class="muted" style="font-size: 14px">
+                    {{ m.day(w.scheduled_date, today) or 'Anytime' }}{% if w.duration_minutes %} · {{ w.duration_minutes }} min{% endif %} · {{ w.group_count }} group{{ 's' if w.group_count != 1 }}
                 </div>
             </div>
-            {% endfor %}
+            <div style="display: flex; flex-direction: column; gap: 6px">
+                <div class="progress-row"><span>{{ w.completed_set_count }} of {{ w.set_count }} sets</span><span class="muted">{{ m.percent(w.completed_set_count, w.set_count) }}%</span></div>
+                {{ m.progress(w.completed_set_count, w.set_count) }}
+            </div>
+            {% if w.last_coach_message %}
+            <div class="coach-line">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2B59FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"></path></svg>
+                <span><strong>Coach:</strong> {{ w.last_coach_message }}</span>
+            </div>
+            {% endif %}
+            <a href="/workouts/{{ w.id }}" class="ui-btn ui-btn-primary ui-btn-block">
+                {{ 'Continue workout' if w.completed_set_count else 'Start workout' }}
+            </a>
         </div>
-        {% else %}
-        <div class="empty-state-large">
-            <i class="fas fa-dumbbell fa-4x"></i>
-            <h2>No Workouts Yet</h2>
-            <p>Your coach will assign workouts to you</p>
-        </div>
-        {% endif %}
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if upcoming %}
+    <section class="section">
+        <h2 class="section-label">Upcoming</h2>
+        {% for w in upcoming %}
+        <a href="/workouts/{{ w.id }}" class="card list-card">
+            <span class="date-chip">
+                {% if w.scheduled_date %}
+                <small>{{ w.scheduled_date.strftime('%a') }}</small><strong>{{ w.scheduled_date.day }}</strong>
+                {% else %}
+                <small>Any</small><strong>–</strong>
+                {% endif %}
+            </span>
+            <span style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0">
+                <span style="font-size: 17px; font-weight: 700">{{ w.name }}</span>
+                <span class="muted" style="font-size: 14px">{% if w.duration_minutes %}{{ w.duration_minutes }} min · {% endif %}{{ w.set_count }} sets</span>
+            </span>
+            {{ m.chevron() }}
+        </a>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if done %}
+    <section class="section">
+        <h2 class="section-label">Done</h2>
+        {% for w in done %}
+        <a href="/workouts/{{ w.id }}" class="card list-card">
+            <span class="done-dot">{{ m.check() }}</span>
+            <span style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0">
+                <span style="font-size: 17px; font-weight: 700">{{ w.name }}</span>
+                <span class="muted" style="font-size: 14px">{{ w.completed_at.strftime('%a, %b %-d') }} · {{ w.set_count }} of {{ w.set_count }} sets</span>
+            </span>
+            {{ m.chevron() }}
+        </a>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if not in_progress and not upcoming and not done %}
+    <div class="card empty" style="padding: 40px 20px">
+        <div style="font-size: 18px; font-weight: 800; color: var(--ink)">No workouts yet</div>
+        <p style="margin-top: 6px">Your coach will assign your first workout soon.</p>
     </div>
+    {% endif %}
 </div>
 {% endblock %}
