@@ -16,7 +16,7 @@
                placeholder="{{ 'Workout name' if target else 'Name your template…' }}">
         <span class="badge" id="statusBadge"></span>
     </div>
-    <button type="button" id="saveStatus" class="save-state" title="Save status">
+    <button type="button" id="saveStatus" class="save-state" title="Save status" tabindex="-1">
         <span id="saveStatusText">Not started</span>
     </button>
     {% if not target %}
@@ -67,11 +67,22 @@
             </div>
         </div>
 
+        <p class="kbd-help" aria-label="Keyboard shortcuts">
+            <span><kbd>Enter</kbd> next field</span>
+            <span><kbd>Shift</kbd>+<kbd>Enter</kbd> back</span>
+            <span>type <kbd>3x bench</kbd> + <kbd>Enter</kbd> to add sets</span>
+            <span><kbd>⌘/Ctrl</kbd>+<kbd>D</kbd> same set again</span>
+            <span><kbd>⌘/Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> remove</span>
+            <span><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>↑↓</kbd> move group</span>
+            <span><kbd>⌘/Ctrl</kbd>+<kbd>Enter</kbd> save</span>
+        </p>
+
         <div id="groupsContainer" style="display: flex; flex-direction: column; gap: 14px"></div>
 
         <div id="newGroupZone" class="drop-zone">
-            <span>Drop an exercise here to start a new group</span>
-            <button type="button" id="addGroupBtn" class="ui-btn ui-btn-outline ui-btn-sm">+ Empty group</button>
+            <div id="newGroupPicker" style="width: 100%; max-width: 520px; text-align: left"></div>
+            <span>…or drop an exercise from the library here</span>
+            <button type="button" id="addGroupBtn" class="ui-btn ui-btn-outline ui-btn-sm" tabindex="-1">+ Empty group</button>
         </div>
     </div>
 </div>

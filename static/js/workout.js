@@ -64,9 +64,10 @@
             const updated = await api('/api/workout-sets/' + set.id + '/result', 'PUT', body);
             Object.assign(set, {
                 actual_reps: updated.actual_reps, actual_weight_kg: updated.actual_weight_kg,
-                actual_duration_s: updated.actual_duration_s, actual_distance_m: updated.actual_distance_m,
-                completed_at: updated.completed_at
+                actual_duration_s: updated.actual_duration_s, actual_distance_m: updated.actual_distance_m
             });
+            // Only a tick/untick decides done-ness: a value-only save racing a tick may answer last with a stale state
+            if ('completed' in body) set.completed_at = updated.completed_at;
             return true;
         } catch (err) {
             notify('Not saved: ' + err.message, 'error');
@@ -158,6 +159,25 @@
         });
         grid.appendChild(tick);
         row.appendChild(grid);
+
+        // Keyboard: Enter → next value in this set; Enter on its last value ticks the set and jumps to the
+        // next set's first value. Shift+Enter goes back. Values are selected on focus so typing replaces them.
+        const order = Object.values(inputs);
+        order.forEach((input, i) => {
+            input.addEventListener('focus', () => { try { input.select(); } catch (_) { /* ignore */ } });
+            input.addEventListener('keydown', async (e) => {
+                if (e.key !== 'Enter' || e.isComposing) return;
+                e.preventDefault();
+                const all = Array.from(document.querySelectorAll('.set-input'));
+                if (e.shiftKey) { const prev = all[all.indexOf(input) - 1]; if (prev) prev.focus(); return; }
+                if (i < order.length - 1) { order[i + 1].focus(); return; }
+                if (!set.completed_at) tick.click();                 // the tick saves the typed values too
+                const later = all.slice(all.indexOf(input) + 1)
+                    .find((x) => !x.closest('.set-row').classList.contains('done'));
+                if (later) later.focus(); else input.blur();
+            });
+        });
+        if (!order.length) tick.setAttribute('aria-keyshortcuts', 'Enter');
 
         if (set.note) row.appendChild(h('div', { class: 'set-note' }, set.note));
         row.appendChild(h('div', { class: 'set-foot' },

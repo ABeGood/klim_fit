@@ -277,6 +277,15 @@
         }
     });
 
+    // Keyboard: Enter / Shift+Enter move between the editable fields (each saves on change as focus leaves)
+    document.getElementById('groups').addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.isComposing || !e.target.matches('.inline-num, .inline-text')) return;
+        e.preventDefault();
+        const all = Array.from(document.querySelectorAll('#groups .inline-num, #groups .inline-text'));
+        const next = all[all.indexOf(e.target) + (e.shiftKey ? -1 : 1)];
+        if (next) { next.focus(); if (next.select) next.select(); } else e.target.blur();
+    });
+
     renderGroups();
     renderChat();
 })();

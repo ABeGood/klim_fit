@@ -215,28 +215,65 @@
         return group;
     }
 
-    function addSetToGroup(exerciseId, group) {
+    // Adds a set of an exercise at the end of a group. If the group already has a set of that exercise,
+    // the new one starts with its targets and rest ("same again"), saved right after it's created.
+    function addSetToGroup(exerciseId, group, opts) {
+        const options = opts || {};
         maybeCreateTarget(true);
         const ex = exerciseById(exerciseId);
         const set = newSet(exerciseId);
+        const source = group.sets.slice().reverse().find((s) => s.exercise_id === exerciseId);
+        if (source) {
+            PARAMS.forEach((p) => { set['target_' + p] = source['target_' + p]; });
+            set.rest_seconds = source.rest_seconds;
+        }
         group.sets.push(set);
+        if (options.focus !== false) focusAfterRender(firstFieldKey(set));
         render();
         sync.push('Add ' + ex.name, async () => {
             const resp = await api('/api/' + KIND + '/groups/' + group.id + '/sets', 'POST', { exercise_id: exerciseId });
             set.id = resp.id;
+            if (source) {
+                const body = { rest_seconds: set.rest_seconds };
+                PARAMS.forEach((p) => { if (set['target_' + p] != null) body['target_' + p] = set['target_' + p]; });
+                await api('/api/' + KIND + '/sets/' + set.id, 'PUT', body);
+            }
         });
-        focusFirstInput(set);
+        return set;
     }
 
-    function addExerciseAsNewGroup(exerciseId) {
+    // count > 1 ("3x bench") adds several sets; focus lands on the first new one
+    function addSets(exerciseId, group, count) {
+        const first = addSetToGroup(exerciseId, group);
+        for (let i = 1; i < (count || 1); i++) addSetToGroup(exerciseId, group, { focus: false });
+        focusAfterRender(firstFieldKey(first));
+        render();
+    }
+
+    function addExerciseAsNewGroup(exerciseId, count) {
         const group = addGroup();
-        addSetToGroup(exerciseId, group);
+        addSets(exerciseId, group, count);
     }
 
-    function focusFirstInput(set) {
-        const input = el.groups.querySelector('input[data-set="' + set.lid + '"]');
-        if (input) input.focus({ preventScroll: false });
+    // ---------- Focus that survives re-rendering ----------
+    // Every editable control carries data-fkey ("s:<set lid>:<field>", "g:<group lid>:name|note|add");
+    // render() rebuilds the DOM, then puts focus back on the same key (or on the one asked for).
+    let pendingFocus = null;
+    function focusAfterRender(key) { pendingFocus = key; }
+    function focusKey(key) {
+        const target = key && document.querySelector('[data-fkey="' + key + '"]');
+        if (!target) return false;
+        target.focus();
+        if (target.type === 'number' || target.dataset.selectOnFocus) { try { target.select(); } catch (_) { /* ignore */ } }
+        return true;
     }
+    function setFields(set) {
+        const ex = exerciseOf(set);
+        return PARAM_FIELDS.filter((p) => ex['has_' + p.key]).map((p) => 'target_' + p.key).concat(['rest_seconds']);
+    }
+    function firstFieldKey(set) { return 's:' + set.lid + ':' + setFields(set)[0]; }
+    function groupOfSet(set) { return state.groups.find((g) => g.sets.indexOf(set) !== -1); }
+    function findGroup(groupLid) { return state.groups.find((g) => String(g.lid) === String(groupLid)); }
 
     function duplicateGroup(group, index) {
         const copy = {
@@ -258,6 +295,8 @@
         if (group.sets.length &&
             !window.confirm('Remove group ' + (index + 1) + ' with ' + group.sets.length + ' set(s)?')) return;
         state.groups.splice(index, 1);
+        const neighbour = state.groups[index] || state.groups[index - 1];
+        focusAfterRender(neighbour ? 'g:' + neighbour.lid + ':add' : 'newGroupAdd');
         render();
         sync.push('Remove group ' + (index + 1), async () => {
             await api('/api/' + KIND + '/groups/' + group.id, 'DELETE');
@@ -269,17 +308,18 @@
         if (to < 0 || to >= state.groups.length) return;
         const moved = state.groups.splice(index, 1)[0];
         state.groups.splice(to, 0, moved);
-        render();
+        render(); // focus stays on the same field, which moved with its group
         sync.push('Move group ' + (index + 1) + (delta < 0 ? ' up' : ' down'), async () => {
             // the order as it stands when this op runs (earlier ops have resolved every id by then)
             await api(targetUrl() + '/groups/order', 'PUT', { ids: state.groups.map((g) => g.id) });
         });
     }
 
-    function duplicateSet(group, set) {
+    function duplicateSet(group, set, field) {
         const ex = exerciseOf(set);
         const copy = Object.assign({}, set, { lid: lid(), id: null });
         group.sets.splice(group.sets.indexOf(set) + 1, 0, copy);
+        focusAfterRender('s:' + copy.lid + ':' + (field || setFields(copy)[0]));
         render();
         sync.push('Duplicate ' + ex.name, async () => {
             const resp = await api('/api/' + KIND + '/sets/' + set.id + '/duplicate', 'POST');
@@ -289,7 +329,10 @@
 
     function removeSet(group, set) {
         const ex = exerciseOf(set);
-        group.sets.splice(group.sets.indexOf(set), 1);
+        const index = group.sets.indexOf(set);
+        group.sets.splice(index, 1);
+        const neighbour = group.sets[index] || group.sets[index - 1];
+        focusAfterRender(neighbour ? firstFieldKey(neighbour) : 'g:' + group.lid + ':add');
         render();
         sync.push('Remove ' + ex.name, async () => {
             await api('/api/' + KIND + '/sets/' + set.id, 'DELETE');
@@ -410,6 +453,7 @@
                                                  step: step, min: min, placeholder: '—' }, attrs || {}));
         if (value !== null && value !== undefined) input.value = value;
         input.addEventListener('input', () => onInput(input.value));
+        input.addEventListener('focus', () => { try { input.select(); } catch (_) { /* ignore */ } });
         return h('div', { class: 'field' }, h('label', { for: id }, label), input);
     }
 
@@ -420,18 +464,23 @@
         row.appendChild(h('span', { class: 'c-set-name', title: ex.name }, ex.name));
         params.forEach((p) => {
             row.appendChild(numberField(p.label + ' *', set['target_' + p.key], p.step, p.step,
-                { 'data-set': set.lid, 'data-required': '1', 'aria-label': ex.name + ' ' + p.label + ' (required)' },
+                { 'data-set': set.lid, 'data-required': '1', 'data-fkey': 's:' + set.lid + ':target_' + p.key,
+                  'aria-label': ex.name + ' ' + p.label + ' (required)' },
                 (v) => onSetFieldChanged(set, 'target_' + p.key, p.label, v, false)));
         });
-        row.appendChild(numberField('Rest, s', set.rest_seconds, '5', '0', { 'aria-label': ex.name + ' rest after, seconds' },
+        row.appendChild(numberField('Rest, s', set.rest_seconds, '5', '0', { 'data-fkey': 's:' + set.lid + ':rest_seconds',
+                                                                             'aria-label': ex.name + ' rest after, seconds' },
             (v) => onSetFieldChanged(set, 'rest_seconds', 'rest', v, true)));
-        row.appendChild(h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.copy, 'aria-label': 'Duplicate ' + ex.name + ' set',
-                                      title: 'Duplicate set', onclick: () => duplicateSet(group, set) }));
-        row.appendChild(h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.x, 'aria-label': 'Remove ' + ex.name + ' set',
-                                      title: 'Remove set', onclick: () => removeSet(group, set) }));
+        // Out of the Tab order: the keyboard path is ⌘/Ctrl+D and ⌘/Ctrl+Shift+X (aria-keyshortcuts says so)
+        row.appendChild(h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.copy, tabindex: '-1',
+                                      'aria-label': 'Duplicate ' + ex.name + ' set', 'aria-keyshortcuts': 'Control+D Meta+D',
+                                      title: 'Duplicate set (⌘/Ctrl+D)', onclick: () => duplicateSet(group, set) }));
+        row.appendChild(h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.x, tabindex: '-1',
+                                      'aria-label': 'Remove ' + ex.name + ' set', 'aria-keyshortcuts': 'Control+Shift+X Meta+Shift+X',
+                                      title: 'Remove set (⌘/Ctrl+Shift+X)', onclick: () => removeSet(group, set) }));
 
         const note = h('input', { class: 'input', type: 'text', maxlength: '500', placeholder: 'Note to client (optional)',
-                                  'aria-label': 'Note on ' + ex.name, style: 'height: 38px' });
+                                  'data-fkey': 's:' + set.lid + ':note', 'aria-label': 'Note on ' + ex.name, style: 'height: 38px' });
         note.value = set.note || '';
         note.addEventListener('input', () => onSetNoteChanged(set, note.value));
 
@@ -444,42 +493,144 @@
         const card = h('section', { class: 'card c-group', 'data-group-lid': group.lid, 'aria-label': 'Group ' + (index + 1) });
 
         const name = h('input', { class: 'c-group-name', type: 'text', maxlength: '200', placeholder: 'Group ' + (index + 1),
-                                  'aria-label': 'Group ' + (index + 1) + ' name (optional)' });
+                                  'data-fkey': 'g:' + group.lid + ':name', 'aria-label': 'Group ' + (index + 1) + ' name (optional)' });
         name.value = group.name;
         name.addEventListener('input', () => onGroupFieldChanged(group, 'name', name.value));
         card.appendChild(h('div', { class: 'c-group-head' },
             h('span', { class: 'c-group-num' }, String(index + 1)),
             name,
-            h('button', { type: 'button', class: 'icon-btn', html: ICONS.up, 'aria-label': 'Move group ' + (index + 1) + ' up',
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.up, tabindex: '-1', 'aria-label': 'Move group ' + (index + 1) + ' up',
+                          'aria-keyshortcuts': 'Alt+Shift+ArrowUp', title: 'Move up (Alt+Shift+↑)',
                           disabled: index === 0, onclick: () => moveGroup(index, -1) }),
-            h('button', { type: 'button', class: 'icon-btn', html: ICONS.down, 'aria-label': 'Move group ' + (index + 1) + ' down',
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.down, tabindex: '-1', 'aria-label': 'Move group ' + (index + 1) + ' down',
+                          'aria-keyshortcuts': 'Alt+Shift+ArrowDown', title: 'Move down (Alt+Shift+↓)',
                           disabled: index === state.groups.length - 1, onclick: () => moveGroup(index, 1) }),
-            h('button', { type: 'button', class: 'icon-btn', html: ICONS.copy, 'aria-label': 'Duplicate group ' + (index + 1),
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.copy, tabindex: '-1', 'aria-label': 'Duplicate group ' + (index + 1),
                           title: 'Duplicate group', onclick: () => duplicateGroup(group, index) }),
-            h('button', { type: 'button', class: 'icon-btn', html: ICONS.x, 'aria-label': 'Remove group ' + (index + 1),
-                          title: 'Remove group', onclick: () => removeGroup(group, index) })));
+            h('button', { type: 'button', class: 'icon-btn', html: ICONS.x, tabindex: '-1', 'aria-label': 'Remove group ' + (index + 1),
+                          'aria-keyshortcuts': 'Control+Shift+X Meta+Shift+X', title: 'Remove group (⌘/Ctrl+Shift+X in its name or note)',
+                          onclick: () => removeGroup(group, index) })));
 
         const body = h('div', { class: 'c-group-body' });
-        if (!group.sets.length) body.appendChild(h('div', { class: 'c-empty' }, 'Empty group — drop an exercise here'));
         group.sets.forEach((set) => body.appendChild(renderSet(group, set)));
+        body.appendChild(exercisePicker({
+            fkey: 'g:' + group.lid + ':add',
+            placeholder: group.sets.length ? 'Add exercise to this group… (e.g. 3x bench)' : 'Type an exercise to add… (e.g. 3x bench)',
+            label: 'Add an exercise to group ' + (index + 1),
+            onPick: (ex, count) => addSets(ex.id, group, count),
+            // Enter on an empty box: on to the next group's box (or "new group"); Shift+Enter: back to the last set
+            onEmptyEnter: (back) => {
+                const last = group.sets[group.sets.length - 1];
+                if (back) return focusKey(last ? 's:' + last.lid + ':rest_seconds' : 'g:' + group.lid + ':name');
+                const next = state.groups[state.groups.indexOf(group) + 1];
+                focusKey(next ? 'g:' + next.lid + ':add' : 'newGroupAdd');
+            }
+        }));
 
         const last = group.sets[group.sets.length - 1];
-        const note = h('input', { class: 'input', type: 'text', maxlength: '500', placeholder: 'e.g. Alternate, no rest between',
-                                  'aria-label': 'Group ' + (index + 1) + ' note', style: 'height: 38px' });
+        const note = h('input', { class: 'input', type: 'text', maxlength: '500', placeholder: 'Group note, e.g. Alternate, no rest between',
+                                  'data-fkey': 'g:' + group.lid + ':note', 'aria-label': 'Group ' + (index + 1) + ' note', style: 'height: 38px' });
         note.value = group.note;
         note.addEventListener('input', () => onGroupFieldChanged(group, 'note', note.value));
         body.appendChild(h('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px' },
-            last ? h('button', { type: 'button', class: 'ui-btn ui-btn-outline ui-btn-sm', style: 'border-style: dashed',
-                                 onclick: () => duplicateSet(group, last) }, '+ Another ' + exerciseOf(last).name + ' set') : null,
+            last ? h('button', { type: 'button', class: 'ui-btn ui-btn-outline ui-btn-sm', style: 'border-style: dashed', tabindex: '-1',
+                                 title: '⌘/Ctrl+D in the add box', onclick: () => duplicateSet(group, last) },
+                     '+ Another ' + exerciseOf(last).name + ' set') : null,
             h('div', { style: 'flex: 1 1 220px' }, note)));
         card.appendChild(body);
         return card;
     }
 
     function render() {
+        const active = document.activeElement;
+        const keepKey = active && active.dataset ? active.dataset.fkey : null;
         el.groups.innerHTML = '';
         state.groups.forEach((group, i) => el.groups.appendChild(renderGroup(group, i)));
         refreshValidity();
+        const key = pendingFocus || keepKey;
+        pendingFocus = null;
+        if (key && !focusKey(key)) focusKey('newGroupAdd');
+    }
+
+    // ---------- Exercise picker (type-ahead combobox) ----------
+    // Type part of a name, ↑/↓ to choose, Enter to add. "3x bench" / "bench x3" adds three sets.
+    // Enter on an empty box calls onEmptyEnter (move on); Esc clears.
+    let pickerSeq = 0;
+    function parseQuery(raw) {
+        const q = raw.trim();
+        let m = q.match(/^(\d{1,2})\s*[x×*]\s*(.+)$/i) || q.match(/^(\d{1,2})\s+(.+)$/);
+        if (m) return { count: Math.min(20, Math.max(1, +m[1])), text: m[2].trim().toLowerCase() };
+        m = q.match(/^(.+?)\s*[x×*]\s*(\d{1,2})$/i);
+        if (m) return { count: Math.min(20, Math.max(1, +m[2])), text: m[1].trim().toLowerCase() };
+        return { count: 1, text: q.toLowerCase() };
+    }
+    function matchExercises(text) {
+        if (!text) return [];
+        const starts = [], contains = [];
+        DATA.exercises.forEach((ex) => {
+            const n = ex.name.toLowerCase();
+            if (n.startsWith(text) || n.split(/[\s-]+/).some((w) => w.startsWith(text))) starts.push(ex);
+            else if (n.indexOf(text) !== -1) contains.push(ex);
+        });
+        return starts.concat(contains).slice(0, 8);
+    }
+
+    function exercisePicker(cfg) {
+        const id = 'pick' + (++pickerSeq);
+        const input = h('input', { class: 'input picker-input', type: 'text', autocomplete: 'off', role: 'combobox',
+                                   'aria-autocomplete': 'list', 'aria-expanded': 'false', 'aria-controls': id + '-list',
+                                   'aria-label': cfg.label, placeholder: cfg.placeholder, 'data-fkey': cfg.fkey,
+                                   'data-picker': '1', 'aria-keyshortcuts': 'Control+D Meta+D' });
+        const list = h('ul', { class: 'picker-list', id: id + '-list', role: 'listbox', hidden: true });
+        let matches = [], active = 0, count = 1;
+
+        function draw() {
+            list.innerHTML = '';
+            const q = parseQuery(input.value);
+            count = q.count;
+            matches = matchExercises(q.text);
+            if (active >= matches.length) active = 0;
+            matches.forEach((ex, i) => {
+                const li = h('li', { role: 'option', id: id + '-o' + i, 'aria-selected': i === active ? 'true' : 'false' },
+                    h('strong', {}, (count > 1 ? count + ' × ' : '') + ex.name), h('small', {}, paramSummary(ex)));
+                li.addEventListener('mousedown', (e) => { e.preventDefault(); pick(i); });
+                list.appendChild(li);
+            });
+            if (input.value.trim() && !matches.length) list.appendChild(h('li', { class: 'picker-empty' }, 'No exercise matches — add it under Exercises'));
+            const open = !!input.value.trim();
+            list.hidden = !open;
+            input.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (matches.length) input.setAttribute('aria-activedescendant', id + '-o' + active);
+            else input.removeAttribute('aria-activedescendant');
+        }
+        function close() { input.value = ''; draw(); }
+        function pick(i) {
+            const ex = matches[i];
+            if (!ex) return;
+            const n = count;
+            close();
+            cfg.onPick(ex, n);
+        }
+
+        input.addEventListener('input', () => { active = 0; draw(); });
+        input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); }, 120));
+        input.addEventListener('focus', () => { if (input.value.trim()) draw(); });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                if (!matches.length) return;
+                e.preventDefault();
+                active = (active + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length;
+                draw();
+            } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                if (!input.value.trim()) { if (cfg.onEmptyEnter) cfg.onEmptyEnter(e.shiftKey); return; }
+                if (matches.length) pick(active);
+                else notify('No exercise called "' + input.value.trim() + '" — add it under Exercises first.', 'warning');
+            } else if (e.key === 'Escape') {
+                if (input.value) { e.preventDefault(); close(); }
+            }
+        });
+        return h('div', { class: 'picker' }, input, list);
     }
 
     // ---------- Save / Discard ----------
@@ -566,7 +717,7 @@
             const chip = h('div', { class: 'chip', 'data-name': ex.name.toLowerCase(), title: ex.description || ex.name },
                 h('span', { html: ICONS.grip }),
                 h('span', { style: 'min-width: 0' }, h('strong', {}, ex.name), h('small', {}, paramSummary(ex))),
-                h('button', { type: 'button', class: 'icon-btn soft chip-add', html: ICONS.plus,
+                h('button', { type: 'button', class: 'icon-btn soft chip-add', html: ICONS.plus, tabindex: '-1',
                               'aria-label': 'Add ' + ex.name + ' to the last group',
                               onclick: (e) => { e.stopPropagation(); addToLastGroup(ex.id); } }));
             initChipDrag(chip, ex);
@@ -688,6 +839,112 @@
         });
     }
 
+    // ---------- Keyboard ----------
+    // Enter = next field (spreadsheet style), Shift+Enter = previous. Tab still visits every field incl. notes.
+    function nextFromSet(set, back) {
+        const group = groupOfSet(set);
+        const i = group.sets.indexOf(set);
+        const other = group.sets[back ? i - 1 : i + 1];
+        if (other && !back) prefillIfBlank(set, other);
+        if (other) return back ? 's:' + other.lid + ':rest_seconds' : firstFieldKey(other);
+        return back ? 'g:' + group.lid + ':name' : 'g:' + group.lid + ':add';
+    }
+
+    function onEnter(key, back) {
+        const [type, lidStr, field] = key.split(':');
+        if (type === 's') {
+            const set = findSet(lidStr);
+            if (!set) return;
+            const fields = setFields(set);
+            const i = fields.indexOf(field);
+            if (field === 'note') return focusKey(nextFromSet(set, back));
+            const next = fields[back ? i - 1 : i + 1];
+            return focusKey(next ? 's:' + set.lid + ':' + next : nextFromSet(set, back));
+        }
+        if (type === 'g') {
+            const group = findGroup(lidStr);
+            if (!group) return;
+            const gi = state.groups.indexOf(group);
+            if (field === 'name') return focusKey(group.sets.length ? firstFieldKey(group.sets[0]) : 'g:' + group.lid + ':add');
+            if (field === 'note') {
+                const nextGroup = state.groups[gi + 1];
+                return focusKey(nextGroup ? 'g:' + nextGroup.lid + ':add' : 'newGroupAdd');
+            }
+        }
+    }
+
+    // Finishing a set with Enter: if the next set is the same exercise and still blank (e.g. after "3x bench"),
+    // give it the values just typed -- each is selected on focus, so typing overwrites and Enter keeps it.
+    function prefillIfBlank(source, target) {
+        if (target.exercise_id !== source.exercise_id) return;
+        const fields = PARAMS.map((p) => 'target_' + p).concat(['rest_seconds']);
+        if (fields.some((f) => target[f] != null) || fields.every((f) => source[f] == null)) return;
+        flushAllEdits();
+        const body = {};
+        fields.forEach((f) => { target[f] = source[f]; if (source[f] != null) body[f] = source[f]; });
+        sync.push('Fill ' + exerciseOf(target).name + ' from the set above', async () => {
+            await api('/api/' + KIND + '/sets/' + target.id, 'PUT', body);
+        });
+        focusAfterRender(firstFieldKey(target));
+        render();
+    }
+
+    function firstExerciseKey() {
+        const g = state.groups[0];
+        return g ? (g.sets.length ? firstFieldKey(g.sets[0]) : 'g:' + g.lid + ':add') : 'newGroupAdd';
+    }
+
+    // Details: name → (Enter) straight to the exercises; the other detail fields step forward
+    const detailOrder = [el.note, el.duration, el.date, el.description].filter(Boolean);
+    [el.name].concat(detailOrder).forEach((input) => {
+        input.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.isComposing) return;
+            e.preventDefault();
+            const i = detailOrder.indexOf(input);
+            if (input === el.name || i === detailOrder.length - 1) focusKey(firstExerciseKey());
+            else detailOrder[i + 1].focus();
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        const mod = e.metaKey || e.ctrlKey;
+        const k = e.key.toLowerCase();
+        if (mod && (e.key === 'Enter' || k === 's')) {           // save from anywhere
+            e.preventDefault();
+            onSave();
+            return;
+        }
+        const t = e.target;
+        const key = t && t.dataset ? t.dataset.fkey : null;
+        if (!key || !key.includes(':') || e.defaultPrevented || e.isComposing) return;
+        const [type, lidStr, field] = key.split(':');
+        const set = type === 's' ? findSet(lidStr) : null;
+        const group = set ? groupOfSet(set) : findGroup(lidStr);
+        if (!group) return;
+
+        if (mod && !e.shiftKey && k === 'd') {                    // duplicate set ("same again")
+            e.preventDefault();
+            if (set) { flushAllEdits(); duplicateSet(group, set, field === 'note' ? null : field); }
+            else if (group.sets.length) { flushAllEdits(); duplicateSet(group, group.sets[group.sets.length - 1]); }
+            return;
+        }
+        if (mod && e.shiftKey && k === 'x') {                     // remove set (or group from its own fields)
+            e.preventDefault();
+            if (set) removeSet(group, set);
+            else removeGroup(group, state.groups.indexOf(group));
+            return;
+        }
+        if (e.altKey && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {   // move group
+            e.preventDefault();
+            moveGroup(state.groups.indexOf(group), e.key === 'ArrowUp' ? -1 : 1);
+            return;
+        }
+        if (e.key === 'Enter' && !mod && t.dataset.picker !== '1') {
+            e.preventDefault();
+            onEnter(key, e.shiftKey);
+        }
+    });
+
     // ---------- Wiring ----------
     el.name.value = state.target.name;
     el.description.value = state.target.description;
@@ -725,6 +982,29 @@
         }
     });
 
+    // "Add exercise as a new group" box under the groups
+    document.getElementById('newGroupPicker').appendChild(exercisePicker({
+        fkey: 'newGroupAdd',
+        placeholder: 'Start a new group: type an exercise… (e.g. 3x squats)',
+        label: 'Add an exercise as a new group',
+        onPick: (ex, count) => addExerciseAsNewGroup(ex.id, count),
+        // Never jump to Save here: repeated Enter presses must not save and leave the page by accident
+        onEmptyEnter: (back) => back && state.groups.length
+            ? focusKey('g:' + state.groups[state.groups.length - 1].lid + ':add')
+            : notify(el.saveBtn.disabled ? (el.saveBtn.title || 'Add an exercise first.')
+                                                       : 'All done? Press ⌘/Ctrl+Enter to save.', 'info')
+    }));
+
+    // Library search: Enter adds the first visible exercise to the last group
+    el.search.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const chip = Array.from(el.chips.querySelectorAll('.chip')).find((c) => !c.hidden);
+        const ex = chip && DATA.exercises.find((x) => x.name.toLowerCase() === chip.dataset.name);
+        if (ex) { addToLastGroup(ex.id); el.search.value = ''; el.search.dispatchEvent(new Event('input')); }
+    });
+
     renderLibrary();
     render();
+    if (IS_NEW) el.name.focus();
 })();
