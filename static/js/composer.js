@@ -318,9 +318,9 @@
         });
     }
 
-    function duplicateSet(group, set, field) {
+    function duplicateSet(group, set, field, fresh) {
         const ex = exerciseOf(set);
-        const copy = Object.assign({}, set, { lid: lid(), id: null });
+        const copy = Object.assign({}, set, { lid: lid(), id: null, fresh: !!fresh });
         group.sets.splice(group.sets.indexOf(set) + 1, 0, copy);
         focusAfterRender('s:' + copy.lid + ':' + (field || setFields(copy)[0]));
         render();
@@ -330,12 +330,12 @@
         });
     }
 
-    function removeSet(group, set) {
+    function removeSet(group, set, focusTo) {
         const ex = exerciseOf(set);
         const index = group.sets.indexOf(set);
         group.sets.splice(index, 1);
         const neighbour = group.sets[index] || group.sets[index - 1];
-        focusAfterRender(neighbour ? firstFieldKey(neighbour) : 'g:' + group.lid + ':add');
+        focusAfterRender(focusTo || (neighbour ? firstFieldKey(neighbour) : 'g:' + group.lid + ':add'));
         render();
         sync.push('Remove ' + ex.name, async () => {
             await api('/api/' + KIND + '/sets/' + set.id, 'DELETE');
@@ -368,6 +368,7 @@
             if (isNaN(value) || value < 0 || (!allowZero && value === 0)) return;
         }
         set[field] = value;
+        set.fresh = false;
         refreshValidity();
         const ex = exerciseOf(set);
         debouncedPush(set.lid + ':' + field, ex.name + ': ' + label + ' = ' + (value === null ? '—' : value),
@@ -380,6 +381,7 @@
 
     function onSetNoteChanged(set, rawValue) {
         set.note = rawValue;
+        set.fresh = false;
         const ex = exerciseOf(set);
         debouncedPush(set.lid + ':note', 'Note on ' + ex.name, async () => {
             await api('/api/' + KIND + '/sets/' + set.id, 'PUT', { note: set.note });
@@ -477,6 +479,7 @@
         if (!parsed) return;
         set.target_reps = parsed.reps;
         set.target_reps_max = parsed.max;
+        set.fresh = false;
         refreshValidity();
         const ex = exerciseOf(set);
         debouncedPush(set.lid + ':target_reps', ex.name + ': reps = ' + (parsed.max ? 'max' : (parsed.reps || '—')), async () => {
@@ -913,9 +916,15 @@
             if (!set) return;
             const fields = setFields(set);
             const i = fields.indexOf(field);
-            if (field === 'note') return focusKey(nextFromSet(set, back));
-            const next = fields[back ? i - 1 : i + 1];
-            return focusKey(next ? 's:' + set.lid + ':' + next : nextFromSet(set, back));
+            const next = field === 'note' ? null : fields[back ? i - 1 : i + 1];
+            if (next) return focusKey('s:' + set.lid + ':' + next);
+            const group = groupOfSet(set);
+            // Last field of the group's last set: Enter adds a copy of it (same exercise and values) -- Esc leaves
+            if (!back && group.sets[group.sets.length - 1] === set) {
+                flushAllEdits();
+                return duplicateSet(group, set, null, true);
+            }
+            return focusKey(nextFromSet(set, back));
         }
         if (type === 'g') {
             const group = findGroup(lidStr);
@@ -1001,6 +1010,13 @@
         if (e.key === 'Enter' && !mod && t.dataset.picker !== '1') {
             e.preventDefault();
             onEnter(key, e.shiftKey);
+            return;
+        }
+        if (e.key === 'Escape' && set) {
+            e.preventDefault();
+            const addKey = 'g:' + group.lid + ':add';
+            if (set.fresh && group.sets[group.sets.length - 1] === set) removeSet(group, set, addKey);
+            else focusKey(addKey);
         }
     });
 
