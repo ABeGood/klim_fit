@@ -99,7 +99,8 @@
         const p = prefix || 'target_';
         const parts = [];
         if (set.has_weight_kg && set[p + 'weight_kg'] != null) parts.push(set[p + 'weight_kg'] + ' kg');
-        if (set.has_reps && set[p + 'reps'] != null) parts.push('× ' + set[p + 'reps']);
+        if (set.has_reps && p === 'target_' && set.target_reps_max) parts.push('× max');
+        else if (set.has_reps && set[p + 'reps'] != null) parts.push('× ' + set[p + 'reps']);
         if (set.has_duration_s && set[p + 'duration_s'] != null) parts.push(set[p + 'duration_s'] + ' s');
         if (set.has_distance_m && set[p + 'distance_m'] != null) parts.push(set[p + 'distance_m'] + ' m');
         return parts.join(' ') || '—';

@@ -105,6 +105,7 @@ class SetCreate(BaseModel):
 
 class SetUpdate(BaseModel):
     target_reps: Optional[int] = POSITIVE_INT
+    target_reps_max: Optional[bool] = None  # true = "max" reps (clears target_reps); a rep number turns it off
     target_weight_kg: Optional[float] = POSITIVE_FLOAT
     target_duration_s: Optional[int] = POSITIVE_INT
     target_distance_m: Optional[float] = POSITIVE_FLOAT
@@ -802,7 +803,15 @@ async def api_update_set(request: Request, kind: Kind, set_id: int, body: SetUpd
     """Partial update of targets, rest and note; an explicit null clears a value"""
     require_admin(request)
     check_editable(kind, db.get_owner_id(kind.value, set_id=set_id))
-    return db.update_set(kind.value, set_id, changes_from(body))
+    changes = changes_from(body)
+    # Reps are either a number or "max", never both
+    if 'target_reps_max' in changes:
+        changes['target_reps_max'] = bool(changes['target_reps_max'])
+        if changes['target_reps_max']:
+            changes['target_reps'] = None
+    elif changes.get('target_reps') is not None:
+        changes['target_reps_max'] = False
+    return db.update_set(kind.value, set_id, changes)
 
 @app.delete('/api/{kind}/sets/{set_id}')
 async def api_delete_set(request: Request, kind: Kind, set_id: int):

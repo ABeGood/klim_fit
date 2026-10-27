@@ -111,7 +111,8 @@
             const input = h('input', {
                 type: 'number', class: 'set-input', inputmode: p.mode, step: p.step, min: '0',
                 'aria-label': 'Set ' + (set._index + 1) + ' ' + set.exercise_name + ' ' + p.label,
-                placeholder: set['target_' + p.key] != null ? String(set['target_' + p.key]) : '—'
+                placeholder: p.key === 'reps' && set.target_reps_max ? 'max'
+                    : set['target_' + p.key] != null ? String(set['target_' + p.key]) : '—'
             });
             if (cols.length > 2) input.style.width = '54px';
             if (set['actual_' + p.key] != null) input.value = set['actual_' + p.key];

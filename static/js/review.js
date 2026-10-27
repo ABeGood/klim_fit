@@ -96,6 +96,7 @@
         const wrap = h('div', { class: 'inline-fields' });
         PARAMS.forEach((p) => {
             if (!set['has_' + p.key]) return;
+            if (p.key === 'reps') { wrap.appendChild(repsEditor(set)); return; }
             const input = h('input', { type: 'number', class: 'inline-num', step: p.step, min: '0', inputmode: 'decimal',
                                        placeholder: '—', 'aria-label': set.exercise_name + ' target ' + p.label });
             if (set['target_' + p.key] != null) input.value = set['target_' + p.key];
@@ -103,6 +104,34 @@
             wrap.appendChild(h('label', { class: 'inline-field' }, input, h('span', {}, p.label)));
         });
         return wrap;
+    }
+
+    // Reps: a number, or "max" (as many as possible) -- typed as m / max
+    function repsEditor(set) {
+        const shown = () => set.target_reps_max ? 'max' : (set.target_reps != null ? String(set.target_reps) : '');
+        const input = h('input', { type: 'text', class: 'inline-num', inputmode: 'numeric', autocomplete: 'off', placeholder: '— / max',
+                                   'aria-label': set.exercise_name + ' target reps, a number or max' });
+        input.value = shown();
+        input.addEventListener('change', async () => {
+            const v = input.value.trim().toLowerCase();
+            let body;
+            if (!v) body = { target_reps: null, target_reps_max: false };
+            else if (/^m(a(x)?)?$|^amrap$/.test(v)) body = { target_reps_max: true };
+            else if (/^\d+$/.test(v) && +v > 0) body = { target_reps: +v, target_reps_max: false };
+            else { notify('Reps: enter a number, or max.', 'warning'); input.value = shown(); return; }
+            try {
+                const updated = await api('/api/workouts/sets/' + set.id, 'PUT', body);
+                set.target_reps = updated.target_reps;
+                set.target_reps_max = updated.target_reps_max;
+                input.value = shown();
+                input.classList.add('saved');
+                setTimeout(() => input.classList.remove('saved'), 1200);
+            } catch (err) {
+                notify('Not saved: ' + err.message, 'error');
+                input.value = shown();
+            }
+        });
+        return h('label', { class: 'inline-field' }, input, h('span', {}, 'reps'));
     }
 
     function restEditor(set) {

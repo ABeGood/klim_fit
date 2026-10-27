@@ -188,6 +188,7 @@ class Set(RowModel):
     position: int = 1
     exercise_id: int = 0
     target_reps: Optional[int] = None
+    target_reps_max: bool = False  # AMRAP: "max" reps instead of a number
     target_weight_kg: Optional[float] = None
     target_duration_s: Optional[int] = None
     target_distance_m: Optional[float] = None

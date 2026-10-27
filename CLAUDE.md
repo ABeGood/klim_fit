@@ -94,7 +94,8 @@ workout_templates  id, created_by → accounts SET NULL, name, description, dura
                    status draft|ready
 template_groups    id, template_id → CASCADE, position, name NULL, note
 template_sets      id, group_id → CASCADE, position, exercise_id → exercises RESTRICT,
-                   target_reps/target_weight_kg/target_duration_s/target_distance_m, rest_seconds, note
+                   target_reps/target_weight_kg/target_duration_s/target_distance_m, target_reps_max BOOL
+                   ("max" reps = AMRAP; target_reps is then NULL), rest_seconds, note
 workouts           id, client_id → accounts CASCADE, template_id → SET NULL, assigned_by → SET NULL,
                    name, description, duration_minutes, note, scheduled_date DATE, completed_at
 workout_groups     id, workout_id → CASCADE, position, name NULL, note
@@ -140,7 +141,7 @@ comments           id, author_id → accounts CASCADE, exactly one of workout_id
 | `POST /api/{kind}/groups/{id}/duplicate` | Copy group + sets right after the original |
 | `POST /api/{kind}/groups/{id}/sets` | Append a set of an exercise (`SetCreate`) |
 | `PUT /api/{kind}/groups/{id}/sets/order` | Reorder sets within a group |
-| `PUT/DELETE /api/{kind}/sets/{id}` | Partial update of targets/rest/note (`SetUpdate`; `null` clears) / delete |
+| `PUT/DELETE /api/{kind}/sets/{id}` | Partial update of targets/rest/note (`SetUpdate`; `null` clears; `target_reps_max: true` clears `target_reps`, a rep number turns max off) / delete |
 | `POST /api/{kind}/sets/{id}/duplicate` | Copy set right after the original (targets, never results) |
 
 Errors: API routes don't wrap themselves in try/except — app-level handlers map `ValueError` → 400 and `psycopg2.IntegrityError` → 409; raise `HTTPException` for 401/404/409. Responses are plain dicts (model `to_dict()` plus extras), encoded by FastAPI.

@@ -64,6 +64,7 @@
             set['target_' + p] = s['target_' + p];
             set['has_' + p] = s['has_' + p];
         });
+        set.target_reps_max = !!s.target_reps_max;
         return set;
     }
 
@@ -198,7 +199,7 @@
 
     // ---------- Structural actions ----------
     function newSet(exerciseId) {
-        const set = { lid: lid(), id: null, exercise_id: exerciseId, rest_seconds: null, note: '' };
+        const set = { lid: lid(), id: null, exercise_id: exerciseId, rest_seconds: null, note: '', target_reps_max: false };
         PARAMS.forEach((p) => { set['target_' + p] = null; });
         return set;
     }
@@ -225,6 +226,7 @@
         const source = group.sets.slice().reverse().find((s) => s.exercise_id === exerciseId);
         if (source) {
             PARAMS.forEach((p) => { set['target_' + p] = source['target_' + p]; });
+            set.target_reps_max = source.target_reps_max;
             set.rest_seconds = source.rest_seconds;
         }
         group.sets.push(set);
@@ -236,6 +238,7 @@
             if (source) {
                 const body = { rest_seconds: set.rest_seconds };
                 PARAMS.forEach((p) => { if (set['target_' + p] != null) body['target_' + p] = set['target_' + p]; });
+                if (set.target_reps_max) body.target_reps_max = true;
                 await api('/api/' + KIND + '/sets/' + set.id, 'PUT', body);
             }
         });
@@ -394,6 +397,9 @@
     }
 
     // ---------- Validation (live) ----------
+    // A required value is set when it's a positive number -- or, for reps, "max"
+    const hasTarget = (set, key) => set['target_' + key] > 0 || (key === 'reps' && set.target_reps_max);
+
     function problems() {
         const list = [];
         if (!state.groups.length) list.push('add at least one group');
@@ -402,7 +408,7 @@
             group.sets.forEach((set) => {
                 const ex = exerciseOf(set);
                 PARAM_FIELDS.forEach((p) => {
-                    if (ex['has_' + p.key] && !(set['target_' + p.key] > 0)) {
+                    if (ex['has_' + p.key] && !hasTarget(set, p.key)) {
                         list.push(ex.name + ' in group ' + (gi + 1) + ': ' + p.label.toLowerCase() + ' missing');
                     }
                 });
@@ -443,7 +449,7 @@
     }
     function setMissing(set) {
         const ex = exerciseOf(set);
-        return PARAM_FIELDS.filter((p) => ex['has_' + p.key] && !(set['target_' + p.key] > 0)).map((p) => p.label.toLowerCase());
+        return PARAM_FIELDS.filter((p) => ex['has_' + p.key] && !hasTarget(set, p.key)).map((p) => p.label.toLowerCase());
     }
 
     // ---------- Rendering ----------
@@ -457,12 +463,62 @@
         return h('div', { class: 'field' }, h('label', { for: id }, label), input);
     }
 
+    // Reps: a number or "max" (type m / max, or use the toggle -- phone number pads have no letters)
+    function parseReps(raw) {
+        const v = raw.trim().toLowerCase();
+        if (!v) return { reps: null, max: false };
+        if (/^m(a(x)?)?$|^amrap$/.test(v)) return { reps: null, max: true };
+        const n = parseInt(v, 10);
+        return n > 0 && String(n) === v ? { reps: n, max: false } : null; // null = not valid (yet)
+    }
+
+    function onRepsChanged(set, raw) {
+        const parsed = parseReps(raw);
+        if (!parsed) return;
+        set.target_reps = parsed.reps;
+        set.target_reps_max = parsed.max;
+        refreshValidity();
+        const ex = exerciseOf(set);
+        debouncedPush(set.lid + ':target_reps', ex.name + ': reps = ' + (parsed.max ? 'max' : (parsed.reps || '—')), async () => {
+            await api('/api/' + KIND + '/sets/' + set.id, 'PUT',
+                      parsed.max ? { target_reps_max: true } : { target_reps: parsed.reps, target_reps_max: false });
+        });
+    }
+
+    function repsField(set, ex) {
+        const id = 'f' + lid();
+        const input = h('input', { id: id, class: 'input num', type: 'text', inputmode: 'numeric', autocomplete: 'off',
+                                   placeholder: '— / max', 'data-set': set.lid, 'data-required': '1',
+                                   'data-fkey': 's:' + set.lid + ':target_reps', 'data-select-on-focus': '1',
+                                   'aria-label': ex.name + ' reps (required): a number, or max for as many as possible' });
+        input.value = set.target_reps_max ? 'max' : (set.target_reps != null ? set.target_reps : '');
+        input.addEventListener('input', () => onRepsChanged(set, input.value));
+        input.addEventListener('focus', () => { try { input.select(); } catch (_) { /* ignore */ } });
+        input.addEventListener('blur', () => {   // tidy what was typed: "m" -> "max", junk -> last good value
+            input.value = set.target_reps_max ? 'max' : (set.target_reps != null ? set.target_reps : '');
+            refreshValidity();
+        });
+        const toggle = h('button', { type: 'button', class: 'max-toggle' + (set.target_reps_max ? ' on' : ''), tabindex: '-1',
+                                     'aria-pressed': set.target_reps_max ? 'true' : 'false',
+                                     title: 'As many reps as possible (or type max)' }, 'max');
+        toggle.addEventListener('click', () => {
+            input.value = set.target_reps_max ? '' : 'max';
+            onRepsChanged(set, input.value);
+            toggle.classList.toggle('on', set.target_reps_max);
+            toggle.setAttribute('aria-pressed', set.target_reps_max ? 'true' : 'false');
+            input.focus();
+        });
+        return h('div', { class: 'field' },
+            h('label', { for: id, class: 'reps-label' }, 'Reps *', toggle), input);
+    }
+
     function renderSet(group, set) {
         const ex = exerciseOf(set);
         const params = PARAM_FIELDS.filter((p) => ex['has_' + p.key]);
         const row = h('div', { class: 'c-set', style: '--cols:' + params.length });
         row.appendChild(h('span', { class: 'c-set-name', title: ex.name }, ex.name));
         params.forEach((p) => {
+            if (p.key === 'reps') { row.appendChild(repsField(set, ex)); return; }
             row.appendChild(numberField(p.label + ' *', set['target_' + p.key], p.step, p.step,
                 { 'data-set': set.lid, 'data-required': '1', 'data-fkey': 's:' + set.lid + ':target_' + p.key,
                   'aria-label': ex.name + ' ' + p.label + ' (required)' },
@@ -878,10 +934,13 @@
     function prefillIfBlank(source, target) {
         if (target.exercise_id !== source.exercise_id) return;
         const fields = PARAMS.map((p) => 'target_' + p).concat(['rest_seconds']);
-        if (fields.some((f) => target[f] != null) || fields.every((f) => source[f] == null)) return;
+        if (fields.some((f) => target[f] != null) || target.target_reps_max) return;
+        if (fields.every((f) => source[f] == null) && !source.target_reps_max) return;
         flushAllEdits();
         const body = {};
         fields.forEach((f) => { target[f] = source[f]; if (source[f] != null) body[f] = source[f]; });
+        target.target_reps_max = source.target_reps_max;
+        if (source.target_reps_max) body.target_reps_max = true;
         sync.push('Fill ' + exerciseOf(target).name + ' from the set above', async () => {
             await api('/api/' + KIND + '/sets/' + target.id, 'PUT', body);
         });

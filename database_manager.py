@@ -25,7 +25,8 @@ KINDS = {
                  'parent': 'workout_id'},
 }
 
-TARGET_COLUMNS = ['target_' + p for p in PARAMS]
+# target_reps_max = "as many reps as possible" (AMRAP): the set has no rep number, the client logs what they did
+TARGET_COLUMNS = ['target_' + p for p in PARAMS] + ['target_reps_max']
 ACTUAL_COLUMNS = ['actual_' + p for p in PARAMS]
 
 # Columns an API caller may change, per object
@@ -133,6 +134,7 @@ class DatabaseManager:
         """Create all required tables (the canonical schema)"""
         param_columns = """
             target_reps INTEGER CHECK (target_reps > 0),
+            target_reps_max BOOLEAN NOT NULL DEFAULT FALSE,
             target_weight_kg DECIMAL(6,2) CHECK (target_weight_kg > 0),
             target_duration_s INTEGER CHECK (target_duration_s > 0),
             target_distance_m DECIMAL(10,2) CHECK (target_distance_m > 0),
@@ -805,7 +807,8 @@ class DatabaseManager:
             if not group['sets']:
                 problems.append(f'group {gi} is empty')
             for si, s in enumerate(group['sets'], 1):
-                missing = [p for p in PARAMS if s['has_' + p] and s['target_' + p] is None]
+                missing = [p for p in PARAMS if s['has_' + p] and s['target_' + p] is None
+                           and not (p == 'reps' and s['target_reps_max'])]
                 if missing:
                     problems.append(f"group {gi}, set {si} ({s['exercise_name']}): {', '.join(missing)} missing")
         return problems

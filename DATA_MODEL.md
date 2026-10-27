@@ -51,7 +51,7 @@ accounts: one table, role = admin | client
 
 **`template_groups`**: id, `template_id` → workout_templates CASCADE, position, name NULL (an optional label like "Press"), note
 
-**`template_sets`**: id, `group_id` → template_groups CASCADE, position, `exercise_id` → exercises **RESTRICT**, target_reps, target_weight_kg, target_duration_s, target_distance_m, rest_seconds, note
+**`template_sets`**: id, `group_id` → template_groups CASCADE, position, `exercise_id` → exercises **RESTRICT**, target_reps, target_weight_kg, target_duration_s, target_distance_m, **target_reps_max** ("max" reps / AMRAP; target_reps then NULL), rest_seconds, note
 
 ### Client side
 **`workouts`**: id, `client_id` → accounts CASCADE, `template_id` → workout_templates SET NULL, `assigned_by` → accounts SET NULL, name NOT NULL, description, duration_minutes, note, scheduled_date DATE NULL, completed_at NULL
