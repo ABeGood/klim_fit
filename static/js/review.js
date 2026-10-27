@@ -181,32 +181,32 @@
                     : h('span', { style: 'color: var(--faint); font-weight: 600' }, 'Not yet');
                 const tr = EDITABLE
                     ? h('tr', { 'data-key': 's' + s.id },
-                        h('td', { style: 'font-weight: 800; color: var(--muted); width: 36px' }, String(si + 1)),
-                        h('td', { style: 'min-width: 170px' }, h('div', { style: 'font-weight: 600' }, s.exercise_name), noteEditor(s)),
-                        h('td', {}, targetEditor(s)),
-                        h('td', {}, restEditor(s)),
-                        h('td', {}, done),
-                        h('td', { style: 'text-align: right' }, threadButton('s' + s.id)),
-                        h('td', { style: 'white-space: nowrap; text-align: right' },
+                        h('td', { class: 'set-no', style: 'font-weight: 800; color: var(--muted); width: 36px' }, String(si + 1)),
+                        h('td', { class: 'set-title', style: 'min-width: 170px' }, h('div', { style: 'font-weight: 600' }, h('span', { class: 'set-no-inline' }, (si + 1) + '. '), s.exercise_name), noteEditor(s)),
+                        h('td', { 'data-label': 'Target' }, targetEditor(s)),
+                        h('td', { 'data-label': 'Rest' }, restEditor(s)),
+                        h('td', { 'data-label': 'Done' }, done),
+                        h('td', { class: 'actions', style: 'text-align: right' }, threadButton('s' + s.id)),
+                        h('td', { class: 'actions', style: 'white-space: nowrap; text-align: right' },
                             h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.copy, title: 'Duplicate set',
                                           'aria-label': 'Duplicate ' + s.exercise_name + ' set ' + (si + 1), onclick: () => duplicateSet(group, s) }),
                             ' ',
                             h('button', { type: 'button', class: 'icon-btn soft', html: ICONS.x, title: 'Remove set',
                                           'aria-label': 'Remove ' + s.exercise_name + ' set ' + (si + 1), onclick: () => removeSet(group, s) })))
                     : h('tr', { 'data-key': 's' + s.id },
-                        h('td', { style: 'font-weight: 800; color: var(--muted); width: 36px' }, String(si + 1)),
-                        h('td', { style: 'font-weight: 600' }, s.exercise_name, s.note ? h('span', { class: 'sub' }, s.note) : null),
-                        h('td', {}, targetText(s)),
-                        h('td', {}, s.rest_seconds != null ? s.rest_seconds + ' s' : '—'),
-                        h('td', {}, done),
-                        h('td', { style: 'text-align: right' }, threadButton('s' + s.id)));
+                        h('td', { class: 'set-no', style: 'font-weight: 800; color: var(--muted); width: 36px' }, String(si + 1)),
+                        h('td', { class: 'set-title', style: 'font-weight: 600' }, h('span', { class: 'set-no-inline' }, (si + 1) + '. '), s.exercise_name, s.note ? h('span', { class: 'sub' }, s.note) : null),
+                        h('td', { 'data-label': 'Target' }, targetText(s)),
+                        h('td', { 'data-label': 'Rest' }, s.rest_seconds != null ? s.rest_seconds + ' s' : '—'),
+                        h('td', { 'data-label': 'Done' }, done),
+                        h('td', { class: 'actions', style: 'text-align: right' }, threadButton('s' + s.id)));
                 tbody.appendChild(tr);
             });
             const heads = ['Set', 'Exercise', 'Target', 'Rest', 'Done'].map((t) => h('th', { scope: 'col' }, t));
             heads.push(h('th', { scope: 'col', style: 'text-align: right' }, 'Chat'));
             if (EDITABLE) heads.push(h('th', { scope: 'col' }, h('span', { class: 'sr-only' }, 'Actions')));
             card.appendChild(h('div', { class: 'table-wrap' },
-                h('table', { class: 'table review-table', style: 'min-width: ' + (EDITABLE ? 760 : 560) + 'px' },
+                h('table', { class: 'table review-table table-stack', style: 'min-width: ' + (EDITABLE ? 760 : 560) + 'px' },
                     h('thead', {}, h('tr', {}, ...heads)), tbody)));
             container.appendChild(card);
         });

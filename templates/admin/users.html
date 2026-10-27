@@ -22,18 +22,18 @@
         </summary>
         {% if c.workouts %}
         <div class="table-wrap">
-            <table class="table" style="min-width: 600px">
+            <table class="table table-stack" style="min-width: 600px">
                 <thead><tr><th scope="col">Workout</th><th scope="col">Date</th><th scope="col">Progress</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
                 <tbody>
                     {% for w in c.workouts %}
                     <tr>
-                        <td><strong>{{ w.name }}</strong></td>
-                        <td class="muted">{{ m.day(w.scheduled_date, today) or 'No date' }}</td>
-                        <td>
+                        <td data-label="Workout"><strong>{{ w.name }}</strong></td>
+                        <td class="muted" data-label="Date">{{ m.day(w.scheduled_date, today) or 'No date' }}</td>
+                        <td data-label="Progress">
                             {% if w.completed %}<span class="badge badge-blue">Completed</span>
                             {% else %}<div class="mini-progress">{{ m.progress(w.completed_set_count, w.set_count) }}<span style="font-size: 13px; font-weight: 600">{{ w.completed_set_count }}/{{ w.set_count }}</span></div>{% endif %}
                         </td>
-                        <td style="text-align: right; white-space: nowrap">
+                        <td class="actions" style="text-align: right; white-space: nowrap">
                             <a href="/workouts/{{ w.id }}" class="ui-btn ui-btn-ghost">Open</a>
                             {% if not w.completed %}<a href="/admin/workout-composer?workout_id={{ w.id }}" class="ui-btn ui-btn-ghost">Edit</a>{% endif %}
                             <button type="button" class="ui-btn ui-btn-ghost" style="color: var(--danger-ink)" data-id="{{ w.id }}" data-name="{{ w.name }}" data-client="{{ c.full_name }}" onclick="deleteWorkout(this)">Delete</button>

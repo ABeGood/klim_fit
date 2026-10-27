@@ -10,7 +10,7 @@
 
 <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px">
     <section class="card table-wrap" style="flex: 999 1 460px; min-width: 0">
-        <table class="table" style="min-width: 520px">
+        <table class="table table-stack" style="min-width: 520px">
             <thead><tr><th scope="col">Exercise</th><th scope="col">Records</th><th scope="col">Used in</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
                 {% for e in exercises or [] %}
@@ -20,10 +20,10 @@
                 {% if e.has_duration_s %}{% set _ = params.append('seconds') %}{% endif %}
                 {% if e.has_distance_m %}{% set _ = params.append('metres') %}{% endif %}
                 <tr {% if e.archived_at %}style="opacity: 0.6"{% endif %}>
-                    <td><strong>{{ e.name }}</strong>{% if e.archived_at %} <span class="badge">Archived</span>{% endif %}{% if e.description %}<span class="sub">{{ e.description }}</span>{% endif %}</td>
-                    <td>{{ params | join(' · ') }}</td>
-                    <td class="muted">{{ e.usage_count }} set{{ 's' if e.usage_count != 1 }}</td>
-                    <td style="text-align: right">
+                    <td data-label="Exercise"><strong>{{ e.name }}</strong>{% if e.archived_at %} <span class="badge">Archived</span>{% endif %}{% if e.description %}<span class="sub">{{ e.description }}</span>{% endif %}</td>
+                    <td data-label="Records">{{ params | join(' · ') }}</td>
+                    <td class="muted" data-label="Used in">{{ e.usage_count }} set{{ 's' if e.usage_count != 1 }}</td>
+                    <td class="actions" style="text-align: right">
                         {% if e.archived_at %}
                         <button type="button" class="ui-btn ui-btn-ghost" data-id="{{ e.id }}" onclick="setArchived(this, 'restore')">Restore</button>
                         {% else %}

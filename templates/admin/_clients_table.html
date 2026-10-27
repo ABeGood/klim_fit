@@ -1,7 +1,7 @@
 {# Clients overview table. Expects: clients (get_clients_overview rows), today #}
 {% import "_macros.html" as m %}
 <div class="card table-wrap">
-    <table class="table" style="min-width: 680px">
+    <table class="table table-stack" style="min-width: 680px">
         <thead>
             <tr>
                 <th scope="col">Client</th>
@@ -16,23 +16,23 @@
             {% set w = c.current_workout %}
             {% set last = [c.last_set_at, c.last_message_at] | select | list | max if (c.last_set_at or c.last_message_at) else none %}
             <tr>
-                <td><strong>{{ c.full_name }}</strong><span class="sub">{{ c.email }}</span></td>
-                <td>
+                <td data-label="Client"><strong>{{ c.full_name }}</strong><span class="sub">{{ c.email }}</span></td>
+                <td data-label="Workout">
                     {% if w %}
                     {{ w.name }}
                     <span class="sub">{{ m.day(w.scheduled_date, today) or 'No date' }}{% if w.scheduled_date and w.scheduled_date < today %} · overdue{% endif %}</span>
                     {% else %}<span class="muted">—</span>{% endif %}
                 </td>
-                <td>
+                <td data-label="Progress">
                     {% if w %}
                     <div class="mini-progress">{{ m.progress(w.completed_set_count, w.set_count, c.full_name ~ ' sets done') }}<span style="font-size: 13px; font-weight: 600">{{ w.completed_set_count }}/{{ w.set_count }}</span></div>
                     {% else %}<span class="muted">—</span>{% endif %}
                 </td>
-                <td class="muted">
+                <td class="muted" data-label="Last activity">
                     {% if last %}{{ 'Logged a set' if last == c.last_set_at else 'Sent a message' }} · {{ m.day(last.date(), today) }}
                     {% else %}Joined {{ c.created_at.strftime('%b %-d') if c.created_at else '' }}{% endif %}
                 </td>
-                <td style="text-align: right; white-space: nowrap">
+                <td class="actions" style="text-align: right; white-space: nowrap">
                     {% if w %}<a href="/workouts/{{ w.id }}" class="ui-btn ui-btn-ghost">Open</a>{% endif %}
                     <a href="/admin/templates?client_id={{ c.id }}" class="ui-btn ui-btn-ghost">Assign</a>
                 </td>

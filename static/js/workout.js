@@ -161,7 +161,7 @@
 
         if (set.note) row.appendChild(h('div', { class: 'set-note' }, set.note));
         row.appendChild(h('div', { class: 'set-foot' },
-            h('span', {}, set.rest_seconds ? 'Rest ' + set.rest_seconds + ' s after' : (set.rest_seconds === 0 ? 'No rest — go straight on' : '')),
+            h('span', {}, set.rest_seconds ? 'Rest ' + set.rest_seconds + ' s after' : (set.rest_seconds === 0 ? 'No rest' : '')),
             chatButton('s' + set.id, 'Comment', () => openChat({ set_id: set.id }))));
         return row;
     }
@@ -183,7 +183,7 @@
             if (group.note) card.appendChild(h('p', { class: 'group-note' }, '“' + group.note + '”'));
             if (group.sets.length) {
                 const head = h('div', { class: 'set-grid head', 'aria-hidden': 'true',
-                    style: 'grid-template-columns: 30px minmax(0, 1fr) repeat(' + cols.length + ', ' + (cols.length > 2 ? 54 : 64) + 'px) 48px' },
+                    style: '--cols:' + cols.length + '; grid-template-columns: 30px minmax(0, 1fr) repeat(' + cols.length + ', ' + (cols.length > 2 ? 54 : 64) + 'px) 48px' },
                     h('span', {}, 'Set'), h('span', {}, 'Target'));
                 cols.forEach((p) => head.appendChild(h('span', { style: 'text-align: center' }, p.label)));
                 head.appendChild(h('span'));

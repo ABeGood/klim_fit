@@ -16,6 +16,16 @@
             <a href="/admin/users" class="nav-item" {% if nav == 'clients' %}aria-current="page"{% endif %}>Clients</a>
             <a href="/admin/templates" class="nav-item" {% if nav == 'templates' %}aria-current="page"{% endif %}>Templates</a>
             <a href="/admin/exercises" class="nav-item" {% if nav == 'exercises' %}aria-current="page"{% endif %}>Exercises</a>
+            <details class="nav-account">
+                <summary aria-label="Account menu">
+                    {% if profile_picture %}<img src="{{ profile_picture }}" alt="" class="avatar">{% else %}<span class="avatar" aria-hidden="true">{{ (name or 'C')[:1] }}</span>{% endif %}
+                </summary>
+                <div class="card nav-account-menu">
+                    <div class="nav-who" style="padding-bottom: 4px">{{ name }}</div>
+                    <a href="/change_password" class="nav-item">Change password</a>
+                    <a href="/logout" class="nav-item">Log out</a>
+                </div>
+            </details>
             <div class="nav-foot">
                 <div class="nav-who">
                     {% if profile_picture %}
