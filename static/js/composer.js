@@ -179,7 +179,6 @@
         });
     }
 
-    let detailsTimer = null;
     function onDetailsChanged() {
         const t = state.target;
         t.name = el.name.value;
@@ -189,15 +188,12 @@
         if (el.date) t.date = el.date.value;
         if (!t.createEnqueued) { maybeCreateTarget(); return; }
 
-        clearTimeout(detailsTimer);
-        detailsTimer = setTimeout(() => {
-            sync.push('Update workout details', async () => {
-                const body = { name: effectiveName(), description: t.description,
-                               duration_minutes: t.duration, note: t.note };
-                if (KIND === 'workouts') body.scheduled_date = t.date || null;
-                await api(targetUrl(), 'PUT', body);
-            });
-        }, 600);
+        debouncedPush('details', 'Update workout details', async () => {
+            const body = { name: effectiveName(), description: t.description,
+                           duration_minutes: t.duration, note: t.note };
+            if (KIND === 'workouts') body.scheduled_date = t.date || null;
+            await api(targetUrl(), 'PUT', body);
+        });
     }
 
     // ---------- Structural actions ----------
@@ -301,10 +297,21 @@
     }
 
     // ---------- Debounced field sync ----------
-    const fieldTimers = {};
+    // Typing waits 600 ms before its op is queued; Save queues whatever is still waiting right away.
+    const pendingEdits = {}; // key -> { timer, label, run }
     function debouncedPush(key, label, run) {
-        clearTimeout(fieldTimers[key]);
-        fieldTimers[key] = setTimeout(() => sync.push(label, run), 600);
+        if (pendingEdits[key]) clearTimeout(pendingEdits[key].timer);
+        pendingEdits[key] = { label: label, run: run, timer: setTimeout(() => flushEdit(key), 600) };
+    }
+    function flushEdit(key) {
+        const edit = pendingEdits[key];
+        if (!edit) return;
+        clearTimeout(edit.timer);
+        delete pendingEdits[key];
+        sync.push(edit.label, edit.run);
+    }
+    function flushAllEdits() {
+        Object.keys(pendingEdits).forEach(flushEdit);
     }
 
     // Empty input clears the value (sent as null); otherwise it must be positive (DB CHECKs)
@@ -497,10 +504,7 @@
         }
 
         el.saveBtn.disabled = true;
-        // Debounced edits may still be waiting on their timers: cancel them and queue a full save instead
-        Object.keys(fieldTimers).forEach((k) => { clearTimeout(fieldTimers[k]); });
-        clearTimeout(detailsTimer);
-        flushPendingFields();
+        flushAllEdits(); // edits typed in the last 600 ms
         // Saving a template marks it ready (assignable); the server re-validates.
         if (KIND === 'templates') {
             sync.push('Mark template ready', async () => { await api(targetUrl(), 'PUT', { status: 'ready' }); });
@@ -516,32 +520,11 @@
         setTimeout(() => { window.location.href = doneUrl(); }, 400);
     }
 
-    // Queue a full save of every field (details, groups, sets); used by Save so nothing typed is lost
-    function flushPendingFields() {
-        const t = state.target;
-        if (t.createEnqueued) {
-            const body = { name: effectiveName(), description: t.description, duration_minutes: t.duration, note: t.note };
-            if (KIND === 'workouts') body.scheduled_date = t.date || null;
-            sync.push('Update workout details', async () => { await api(targetUrl(), 'PUT', body); });
-        }
-        state.groups.forEach((group) => {
-            sync.push('Save group', async () => {
-                await api('/api/' + KIND + '/groups/' + group.id, 'PUT', { name: group.name, note: group.note });
-            });
-            group.sets.forEach((set) => {
-                const body = { rest_seconds: set.rest_seconds, note: set.note };
-                PARAMS.forEach((p) => { if (exerciseOf(set)['has_' + p]) body['target_' + p] = set['target_' + p]; });
-                sync.push('Save ' + exerciseOf(set).name, async () => {
-                    await api('/api/' + KIND + '/sets/' + set.id, 'PUT', body);
-                });
-            });
-        });
-    }
-
     // Discard deletes a template created in this session (only shown for new templates)
     async function onDiscard() {
         if (state.target.createEnqueued && !window.confirm('Discard this template and everything in it?')) return;
         el.cancelBtn.disabled = true;
+        Object.keys(pendingEdits).forEach((k) => { clearTimeout(pendingEdits[k].timer); delete pendingEdits[k]; });
         sync.retry();
         await sync.waitIdle();
         sync.queue.length = 0;
@@ -724,7 +707,8 @@
     if (el.cancelBtn) el.cancelBtn.addEventListener('click', onDiscard);
     el.status.addEventListener('click', () => sync.retry());
     el.backLink.addEventListener('click', async (e) => {
-        // edits are live-saved; just make sure the queue is flushed before leaving
+        // edits are live-saved; just make sure nothing is still waiting before leaving
+        flushAllEdits();
         if (!sync.queue.length && !sync.running) return;
         e.preventDefault();
         sync.retry();
@@ -735,7 +719,7 @@
     });
 
     window.addEventListener('beforeunload', (e) => {
-        if (!allowUnload && sync.queue.length) {
+        if (!allowUnload && (sync.queue.length || Object.keys(pendingEdits).length)) {
             e.preventDefault();
             e.returnValue = '';
         }

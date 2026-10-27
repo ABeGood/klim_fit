@@ -126,13 +126,14 @@ class CommentCreate(BaseModel):
     group_id: Optional[int] = None  # neither group_id nor set_id = comment on the whole workout
     set_id: Optional[int] = None
 
-def changes_from(body: BaseModel) -> dict:
-    """Fields the caller actually sent; blank text clears the value, a blank name is rejected"""
+def changes_from(body: BaseModel, name_required: bool = False) -> dict:
+    """Fields the caller actually sent; blank text clears the value. name_required: a blank `name`
+    is rejected (templates, workouts, exercises) -- group names are optional and may be cleared."""
     changes = body.model_dump(exclude_unset=True)
     for key, value in changes.items():
         if isinstance(value, str):
             changes[key] = value.strip() or None
-    if 'name' in changes and not changes['name']:
+    if name_required and 'name' in changes and not changes['name']:
         raise HTTPException(status_code=400, detail='Name cannot be empty')
     return changes
 
@@ -561,7 +562,7 @@ async def api_exercises(request: Request):
 @app.post('/api/exercises')
 async def api_create_exercise(request: Request, body: ExerciseCreate):
     require_admin(request)
-    changes = changes_from(body)
+    changes = changes_from(body, name_required=True)
     exercise = db.create_exercise(Exercise(created_by=request.session.get('user_id'), **changes))
     return exercise_dict(exercise)
 
@@ -599,7 +600,7 @@ async def api_templates(request: Request):
 @app.post('/api/templates')
 async def api_create_template(request: Request, body: TemplateCreate):
     require_admin(request)
-    changes = changes_from(body)
+    changes = changes_from(body, name_required=True)
     template = db.create_template(WorkoutTemplate(created_by=request.session.get('user_id'), **changes))
     return dict(template.to_dict(), groups=[])
 
@@ -616,7 +617,7 @@ async def api_update_template(request: Request, template_id: int, body: Template
     """Partial update; setting status 'ready' validates the template first (400 listing the problems)"""
     require_admin(request)
     check_editable(Kind.templates, template_id)
-    changes = changes_from(body)
+    changes = changes_from(body, name_required=True)
     if changes.get('status') == 'ready':
         problems = db.validate_structure('templates', template_id)
         if problems:
@@ -665,7 +666,7 @@ async def api_get_workout(request: Request, workout_id: int):
 async def api_update_workout(request: Request, workout_id: int, body: WorkoutUpdate):
     require_admin(request)
     check_editable(Kind.workouts, workout_id)
-    workout = db.update_workout(workout_id, changes_from(body))
+    workout = db.update_workout(workout_id, changes_from(body, name_required=True))
     return dict(workout.to_dict(), completed=workout.completed)
 
 @app.delete('/api/workouts/{workout_id}')
