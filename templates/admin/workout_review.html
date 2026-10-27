@@ -20,6 +20,7 @@
     {% if not workout.completed %}
     <a href="/admin/workout-composer?workout_id={{ workout.id }}" class="ui-btn ui-btn-outline">Edit {{ workout.client_name.split(' ')[0] }}’s copy</a>
     {% endif %}
+    <button type="button" class="ui-btn ui-btn-danger" id="deleteWorkoutBtn">Delete</button>
 </header>
 
 <div class="two-col">

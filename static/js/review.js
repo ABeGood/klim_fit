@@ -265,6 +265,18 @@
         send.disabled = false;
     });
 
+    // Delete the whole workout (also its logged results and chat), then back to Clients
+    document.getElementById('deleteWorkoutBtn').addEventListener('click', async () => {
+        if (!confirm('Delete "' + workout.name + '" for ' + workout.client_name + '? ' +
+                     'Their logged results and chat for it are deleted too. This can\'t be undone.')) return;
+        try {
+            await api('/api/workouts/' + workout.id, 'DELETE');
+            window.location.href = '/admin/users';
+        } catch (err) {
+            notify('Could not delete: ' + err.message, 'error');
+        }
+    });
+
     renderGroups();
     renderChat();
 })();
