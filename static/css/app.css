@@ -303,3 +303,14 @@ body.dragging * { user-select: none; -webkit-user-select: none; }
          border-radius: 10px; cursor: pointer; font-weight: 600; }
 .check:has(input:checked) { background: var(--accent-soft); border-color: var(--accent-line); }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+/* ---------- Inline set editing (coach review) ---------- */
+.review-table td { padding: 10px 12px; }
+.review-table th { padding: 12px; }
+.inline-fields { display: flex; flex-wrap: wrap; gap: 6px; }
+.inline-field { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.inline-num { width: 68px; height: 38px; border: 1px solid var(--field); border-radius: 8px; text-align: center; font-weight: 700; background: var(--surface); padding: 0 4px; }
+.inline-text { width: 100%; height: 32px; margin-top: 4px; border: 1px solid transparent; border-radius: 8px; padding: 0 8px; font-size: 13px; color: var(--ink-2); background: transparent; }
+.inline-text:hover, .inline-text:focus { border-color: var(--field); background: var(--surface); outline: none; }
+.inline-num:focus { border-color: var(--accent); outline: none; }
+.inline-num.saved, .inline-text.saved { border-color: #12613A; box-shadow: 0 0 0 2px rgba(18, 97, 58, 0.15); }

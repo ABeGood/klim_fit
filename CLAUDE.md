@@ -40,7 +40,7 @@ python db_tests.py reset-seed              # drop everything, recreate schema, s
 | `static/js/ui.js` | Shared helpers for app screens, `window.FitCoach = {api, h, ICONS, notify, targetText, timeLabel}`; also `window.FitCoachUtils.showNotification`. Toasts go in `.flash-messages`. |
 | `static/js/composer.js` | The composer app: local state + render, pointer-event drag-and-drop (mouse and touch) plus tap-to-add, group up/down reorder, live validation (Save disabled while required targets are missing), sequential background sync queue with retry. Reads `window.COMPOSER_DATA`. |
 | `static/js/workout.js` | Client workout log: actual-value inputs + Done tick per set, rest timer after a ticked set, full-screen chat per set/group/workout (history.pushState, so the phone's back button closes it). Reads `window.WORKOUT_DATA`. |
-| `static/js/review.js` | Coach review: groups as target-vs-done tables, chat panel filtered to a thread by clicking its button. Reads `window.WORKOUT_DATA`. |
+| `static/js/review.js` | Coach review: groups as target-vs-done tables with targets/rest/note editable in place (each field saves on change) plus duplicate/remove per set — read-only once the workout is completed; chat panel filtered to a thread by clicking its button. Reads `window.WORKOUT_DATA`. |
 | `static/js/main.js`, `static/css/style.css` | Legacy UI kit, now only used by the auth pages. `main.js` auto-adds "Loading…" spinners to every `.btn` and freezes submit buttons — never load it on app screens. |
 | `todo` | Owner's known-issues/wishlist — check it before "discovering" a bug. |
 | `README.md` | **Outdated** (describes the old Flask version) — do not trust it. |
