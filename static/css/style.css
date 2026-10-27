@@ -6,12 +6,12 @@
 }
 
 :root {
-    --primary-color: #2B59FF;
-    --primary-hover: #1E44D6;
-    --primary-light: #EEF2FF;
+    --primary-color: #727272;
+    --primary-hover: #5C5C5C;
+    --primary-light: #ECECEC;
     --secondary-color: #1e293b;
     --accent-color: #0ea5e9;
-    --success-color: #10b981;
+    --success-color: #093023;
     --error-color: #ef4444;
     --warning-color: #f59e0b;
     --info-color: #3b82f6;
@@ -217,7 +217,7 @@ body {
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    background: #F3F4F6;
+    background: #343434;
     padding: 1rem;
 }
 

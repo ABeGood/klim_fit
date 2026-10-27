@@ -18,6 +18,7 @@
     const allSets = [];
     DATA.groups.forEach((g, gi) => g.sets.forEach((s, si) => {
         s._group = g; s._groupIndex = gi; s._index = si;
+        s._done = !!s.completed_at; // what the screen shows; completed_at = what the server confirmed
         allSets.push(s);
     }));
     const groupLabel = (g) => g.name || 'Group ' + (g._i + 1);
@@ -25,7 +26,7 @@
 
     // ---------- Progress ----------
     function refreshProgress() {
-        const done = allSets.filter((s) => s.completed_at).length;
+        const done = allSets.filter((s) => s._done).length;
         const total = allSets.length;
         const pct = total ? Math.round((done / total) * 100) : 0;
         document.getElementById('progressText').textContent = done + ' of ' + total + ' sets';
@@ -40,7 +41,7 @@
     }
 
     // ---------- Rest timer ----------
-    const rest = { left: 0, timer: null };
+    const rest = { left: 0, timer: null, setId: null };
     const restBar = document.getElementById('restBar');
     function showRest() {
         const m = Math.floor(rest.left / 60), s = rest.left % 60;
@@ -48,8 +49,9 @@
         restBar.hidden = rest.left <= 0;
         if (rest.left <= 0) { clearInterval(rest.timer); rest.timer = null; }
     }
-    function startRest(seconds, nextSet) {
+    function startRest(seconds, nextSet, setId) {
         rest.left = seconds;
+        rest.setId = setId;
         document.getElementById('restNext').textContent = 'Rest · next: ' + (nextSet ? nextSet.exercise_name : 'finish');
         clearInterval(rest.timer);
         rest.timer = setInterval(() => { rest.left -= 1; showRest(); }, 1000);
@@ -84,26 +86,28 @@
     // ---------- Render groups ----------
     const chatButtons = {}; // thread key -> function refreshing its label
 
-    function chatButton(key, emptyLabel, open) {
-        const btn = h('button', { type: 'button', class: 'chat-link', onclick: open });
+    // Names are the chat buttons: tapping a set's exercise name or a group's name opens that thread.
+    // A small count appears next to the name once the thread has messages.
+    function nameButton(key, cls, text, ariaName, open) {
+        const btn = h('button', { type: 'button', class: 'name-btn ' + cls, onclick: open });
         const refresh = () => {
             const n = countOf(key);
-            btn.className = 'chat-link' + (n ? ' has' : '');
-            btn.innerHTML = ICONS.chat;
-            btn.appendChild(document.createTextNode(' ' + (n ? n + (n === 1 ? ' message' : ' messages') : emptyLabel)));
+            btn.setAttribute('aria-label', ariaName + ': ' + (n ? n + (n === 1 ? ' message' : ' messages') : 'comments'));
+            btn.innerHTML = '';
+            btn.appendChild(h('span', { class: 'name-text' }, text));
+            if (n) btn.appendChild(h('span', { class: 'count' }, String(n)));
         };
         chatButtons[key] = refresh;
         refresh();
         return btn;
     }
 
-    function renderSet(set, group, cols, mixed) {
+    function renderSet(set, group, cols) {
         const row = h('div', { class: 'set-row' + (set.completed_at ? ' done' : '') });
         const grid = h('div', { class: 'set-grid', style: '--cols:' + cols.length + '; grid-template-columns: 30px minmax(0, 1fr) repeat(' + cols.length + ', ' + (cols.length > 2 ? 54 : 64) + 'px) 48px' });
         grid.appendChild(h('span', { class: 'set-num' }, String(set._index + 1)));
-        grid.appendChild(h('div', { style: 'display: flex; flex-direction: column; min-width: 0' },
-            mixed ? h('span', { class: 'set-ex' }, set.exercise_name) : null,
-            h('span', { class: 'set-target' }, targetText(set))));
+        grid.appendChild(nameButton('s' + set.id, 'set-name', set.exercise_name,
+            set.exercise_name + ', set ' + (set._index + 1), () => openChat({ set_id: set.id })));
 
         const inputs = {};
         cols.forEach((p) => {
@@ -132,31 +136,47 @@
             'aria-pressed': set.completed_at ? 'true' : 'false',
             'aria-label': 'Set ' + (set._index + 1) + ' ' + set.exercise_name + ' done'
         });
-        tick.addEventListener('click', async () => {
-            const markDone = !set.completed_at;
-            const body = { completed: markDone };
-            if (markDone) {
-                // Empty values on a ticked set = "did it as planned": log the targets (or what's typed)
-                PARAMS.forEach((p) => {
-                    if (!set['has_' + p.key]) return;
-                    const typed = inputs[p.key] && inputs[p.key].value !== '' ? parseFloat(inputs[p.key].value) : null;
-                    const value = typed !== null ? typed : (set['actual_' + p.key] != null ? set['actual_' + p.key] : set['target_' + p.key]);
-                    if (value != null && value > 0) body['actual_' + p.key] = value;
-                });
-            }
-            tick.disabled = true;
-            const ok = await saveResult(set, body);
-            tick.disabled = false;
-            if (!ok) return;
-            Object.keys(inputs).forEach((k) => { if (set['actual_' + k] != null) inputs[k].value = set['actual_' + k]; });
-            tick.setAttribute('aria-pressed', set.completed_at ? 'true' : 'false');
-            row.classList.toggle('done', !!set.completed_at);
+        // Optimistic: the tap updates the screen at once and the save runs in the background, one request
+        // at a time per set. If a save fails, the set goes back to its last server-confirmed state.
+        let saving = Promise.resolve();
+        const showDone = () => {
+            tick.setAttribute('aria-pressed', set._done ? 'true' : 'false');
+            row.classList.toggle('done', set._done);
             refreshProgress();
-            if (set.completed_at && set.rest_seconds > 0) {
-                startRest(set.rest_seconds, allSets.find((s) => !s.completed_at && allSets.indexOf(s) > allSets.indexOf(set)));
-            } else if (!set.completed_at) {
+        };
+        tick.addEventListener('click', () => {
+            const markDone = !set._done;
+            const body = { completed: markDone };
+            const filled = []; // empty fields we filled with the logged value, cleared again on failure
+            // Every Done click saves what's in the fields, ticking or unticking. When ticking, an empty
+            // field = "did it as planned": log the saved value or the target.
+            PARAMS.forEach((p) => {
+                if (!set['has_' + p.key]) return;
+                const typed = inputs[p.key] && inputs[p.key].value !== '' ? parseFloat(inputs[p.key].value) : null;
+                const value = typed !== null ? typed
+                    : markDone ? (set['actual_' + p.key] != null ? set['actual_' + p.key] : set['target_' + p.key]) : null;
+                if (value != null && value > 0) {
+                    body['actual_' + p.key] = value;
+                    if (typed === null && inputs[p.key]) { inputs[p.key].value = value; filled.push(inputs[p.key]); }
+                }
+            });
+
+            set._done = markDone;
+            showDone();
+            if (markDone && set.rest_seconds > 0) {
+                startRest(set.rest_seconds, allSets.find((s) => !s._done && allSets.indexOf(s) > allSets.indexOf(set)), set.id);
+            } else if (!markDone && rest.setId === set.id) {
                 rest.left = 0; showRest();
             }
+
+            saving = saving.then(async () => {
+                const ok = await saveResult(set, body);
+                if (ok) return;
+                filled.forEach((input) => { input.value = ''; });
+                set._done = !!set.completed_at;
+                showDone();
+                if (!set._done && rest.setId === set.id) { rest.left = 0; showRest(); }
+            });
         });
         grid.appendChild(tick);
         row.appendChild(grid);
@@ -172,7 +192,7 @@
                 const all = Array.from(document.querySelectorAll('.set-input'));
                 if (e.shiftKey) { const prev = all[all.indexOf(input) - 1]; if (prev) prev.focus(); return; }
                 if (i < order.length - 1) { order[i + 1].focus(); return; }
-                if (!set.completed_at) tick.click();                 // the tick saves the typed values too
+                if (!set._done) tick.click();                        // the tick saves the typed values too
                 const later = all.slice(all.indexOf(input) + 1)
                     .find((x) => !x.closest('.set-row').classList.contains('done'));
                 if (later) later.focus(); else input.blur();
@@ -181,9 +201,6 @@
         if (!order.length) tick.setAttribute('aria-keyshortcuts', 'Enter');
 
         if (set.note) row.appendChild(h('div', { class: 'set-note' }, set.note));
-        row.appendChild(h('div', { class: 'set-foot' },
-            h('span', {}, set.rest_seconds ? 'Rest ' + set.rest_seconds + ' s after' : (set.rest_seconds === 0 ? 'No rest' : '')),
-            chatButton('s' + set.id, 'Comment', () => openChat({ set_id: set.id }))));
         return row;
     }
 
@@ -194,25 +211,23 @@
             return;
         }
         DATA.groups.forEach((group) => {
-            const mixed = new Set(group.sets.map((s) => s.exercise_id)).size > 1;
             const cols = PARAMS.filter((p) => group.sets.some((s) => s['has_' + p.key]));
             const card = h('section', { class: 'card group-card', 'aria-label': groupLabel(group) });
             card.appendChild(h('div', { class: 'group-head' },
-                h('h2', {}, groupLabel(group)),
+                h('h2', {}, nameButton('g' + group.id, 'group-name', groupLabel(group), groupLabel(group),
+                    () => openChat({ group_id: group.id }))),
                 h('span', { class: 'muted', style: 'font-size: 13px; font-weight: 600' },
                     group.sets.length + (group.sets.length === 1 ? ' set' : ' sets'))));
             if (group.note) card.appendChild(h('p', { class: 'group-note' }, '“' + group.note + '”'));
             if (group.sets.length) {
                 const head = h('div', { class: 'set-grid head', 'aria-hidden': 'true',
                     style: '--cols:' + cols.length + '; grid-template-columns: 30px minmax(0, 1fr) repeat(' + cols.length + ', ' + (cols.length > 2 ? 54 : 64) + 'px) 48px' },
-                    h('span', {}, 'Set'), h('span', {}, 'Target'));
+                    h('span', {}, 'Set'), h('span', {}, 'Exercise'));
                 cols.forEach((p) => head.appendChild(h('span', { style: 'text-align: center' }, p.label)));
                 head.appendChild(h('span'));
                 card.appendChild(head);
             }
-            group.sets.forEach((set) => card.appendChild(renderSet(set, group, cols, mixed)));
-            card.appendChild(h('div', { class: 'group-foot' },
-                chatButton('g' + group.id, 'Comment on ' + groupLabel(group), () => openChat({ group_id: group.id }))));
+            group.sets.forEach((set) => card.appendChild(renderSet(set, group, cols)));
             container.appendChild(card);
         });
     }

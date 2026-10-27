@@ -58,5 +58,6 @@
 
     <script src="/static/js/ui.js"></script>
     {% block scripts %}{% endblock %}
+    {% if dev_reload %}<script src="/static/js/dev-reload.js"></script>{% endif %}
 </body>
 </html>

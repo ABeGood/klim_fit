@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 python app.py                              # run on http://127.0.0.1:5000
-uvicorn app:app --reload --port 5000       # run with autoreload
+uvicorn app:app --reload --port 5000       # run with autoreload; with DEV_RELOAD=1 in .env the browser live-reloads too
 uv sync                                    # installs the exact pinned graph from uv.lock
 python db_tests.py                         # NOT pytest — interactive menu: create/drop tables, seed sample data
 python db_tests.py reset-seed              # drop everything, recreate schema, seed (asks to confirm, shows the DB host)

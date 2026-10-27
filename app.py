@@ -43,6 +43,28 @@ db = DatabaseManager()
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# ============ Dev live reload (DEV_RELOAD=1 only) ============
+# Pages poll /__dev/version: a CSS change swaps stylesheets in place, a template/JS change reloads the page.
+DEV_RELOAD = os.getenv('DEV_RELOAD') == '1'
+templates.env.globals['dev_reload'] = DEV_RELOAD
+
+def _latest_mtime(*dirs: str) -> float:
+    return max((os.path.getmtime(os.path.join(root, f))
+                for d in dirs for root, _, files in os.walk(d) for f in files), default=0)
+
+if DEV_RELOAD:
+    @app.get('/__dev/version', include_in_schema=False)
+    async def dev_version():
+        return {'css': _latest_mtime('static/css'), 'page': _latest_mtime('templates', 'static/js')}
+
+    # Without this the browser may keep running a cached old JS file after a reload
+    @app.middleware('http')
+    async def dev_no_cache(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith('/static/'):
+            response.headers['Cache-Control'] = 'no-store'
+        return response
+
 # ============ API error mapping ============
 # API routes don't wrap themselves in try/except: model validation errors (ValueError) become 400,
 # constraint violations 409, anything else the default 500. Page routes still catch their own errors.
